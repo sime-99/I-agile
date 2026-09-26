@@ -275,7 +275,7 @@ function StorySummary({ story, onClose, onEditSummary }: { story: Story; onClose
     <article className="story-summary" style={{ "--story-color": meta.color } as CSSProperties}>
       <div className="story-context"><span className="area-label"><span />{story.area}</span><span className="story-epic">{story.epic}</span></div>
       <h2>{story.title}</h2>
-      {story.summary && <p className="story-description">{story.summary}</p>}
+      {story.summary ? <p className="story-description">{story.summary}</p> : <button className="story-add-description" type="button" onClick={() => onEditSummary(story.id)}>+ Aggiungi descrizione</button>}
       <p>{doneCount}/{story.tasks.length} task completati <span className="story-point-value"><Sparkles size={12} /> {formatPoints(points)}</span></p>
       <select className="story-actions" aria-label={`Azioni per ${story.title}`} defaultValue="" onChange={(event) => { if (event.target.value === "close") onClose(story.id); if (event.target.value === "edit-summary") onEditSummary(story.id); event.currentTarget.value = ""; }}>
         <option value="" disabled>Azioni</option>
