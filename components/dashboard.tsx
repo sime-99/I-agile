@@ -41,6 +41,7 @@ type Task = {
 type Story = {
   id: string;
   title: string;
+  summary: string;
   area: Area;
   epic: string;
   sprint: number | null;
@@ -100,6 +101,7 @@ const seedStories: Story[] = [
   {
     id: "meal-prep",
     title: "Meal prep della settimana",
+    summary: "Organizzare pasti e porzioni per i pranzi della settimana.",
     area: "Casa",
     epic: "Cucina",
     sprint: defaultSprint,
@@ -113,6 +115,7 @@ const seedStories: Story[] = [
   {
     id: "training",
     title: "Allenamento Gym",
+    summary: "Completare le due sessioni di allenamento previste.",
     area: "Salute e fitness",
     epic: "Routine settimanale",
     sprint: defaultSprint,
@@ -125,6 +128,7 @@ const seedStories: Story[] = [
   {
     id: "i-agile",
     title: "MVP I-AGILE",
+    summary: "Costruire la prima versione dell'app per organizzare le mansioni settimanali.",
     area: "Progetti",
     epic: "I-AGILE",
     sprint: defaultSprint,
@@ -205,6 +209,7 @@ function migrateLegacyItems(value: unknown, fallbackSprint: number): Story[] | n
       return {
         id: String(story.id ?? crypto.randomUUID()),
         title: String(story.title ?? "Storia senza titolo"),
+        summary: String(story.summary ?? story.description ?? story.notes ?? ""),
         area: isArea(story.area) ? story.area : "Casa",
         epic: String(story.epic ?? "Senza epica"),
         sprint: hasSprint && story.sprint === null ? null : normaliseSprint(story.sprint, fallbackSprint),
@@ -224,7 +229,7 @@ function migrateLegacyItems(value: unknown, fallbackSprint: number): Story[] | n
     const existing = groups.get(key);
     const task = normaliseTask(rawItem);
     if (existing) existing.tasks.push(task);
-    else groups.set(key, { id: `story-${key}`, title: epic, area, epic, sprint: fallbackSprint, closed: false, tasks: [task] });
+    else groups.set(key, { id: `story-${key}`, title: epic, summary: "", area, epic, sprint: fallbackSprint, closed: false, tasks: [task] });
   }
   return [...groups.values()];
 }
@@ -261,7 +266,7 @@ function TaskCell({ storyId, status, children }: { storyId: string; status: Stat
   return <div className={`task-cell${isOver ? " is-over" : ""}`} ref={setNodeRef}>{children}</div>;
 }
 
-function StorySummary({ story, onClose }: { story: Story; onClose: (storyId: string) => void }) {
+function StorySummary({ story, onClose, onEditSummary }: { story: Story; onClose: (storyId: string) => void; onEditSummary: (storyId: string) => void }) {
   const meta = areaMeta(story.area);
   const doneCount = story.tasks.filter((task) => task.status === "done").length;
   const points = storyPoints(story);
@@ -270,9 +275,11 @@ function StorySummary({ story, onClose }: { story: Story; onClose: (storyId: str
     <article className="story-summary" style={{ "--story-color": meta.color } as CSSProperties}>
       <div className="story-context"><span className="area-label"><span />{story.area}</span><span className="story-epic">{story.epic}</span></div>
       <h2>{story.title}</h2>
+      {story.summary && <p className="story-description">{story.summary}</p>}
       <p>{doneCount}/{story.tasks.length} task completati <span className="story-point-value"><Sparkles size={12} /> {formatPoints(points)}</span></p>
-      <select className="story-actions" aria-label={`Azioni per ${story.title}`} defaultValue="" onChange={(event) => { if (event.target.value === "close") onClose(story.id); }}>
+      <select className="story-actions" aria-label={`Azioni per ${story.title}`} defaultValue="" onChange={(event) => { if (event.target.value === "close") onClose(story.id); if (event.target.value === "edit-summary") onEditSummary(story.id); event.currentTarget.value = ""; }}>
         <option value="" disabled>Azioni</option>
+        <option value="edit-summary">Modifica descrizione</option>
         <option value="close">Chiudi storia</option>
       </select>
     </article>
@@ -322,6 +329,7 @@ function NewStoryDialog({ selectedSprint, onClose, onCreate }: { selectedSprint:
     onCreate({
       id: crypto.randomUUID(),
       title,
+      summary: String(form.get("summary") ?? "").trim(),
       area: String(form.get("area")) as Area,
       epic: String(form.get("epic") ?? "").trim() || "Senza epica",
       sprint: selectedValue ? Number(selectedValue) : null,
@@ -336,12 +344,34 @@ function NewStoryDialog({ selectedSprint, onClose, onCreate }: { selectedSprint:
         <header><h2 id="new-story-title">Nuova storia</h2><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi finestra"><X size={19} /></button></header>
         <form onSubmit={submit}>
           <label>Titolo<input autoFocus name="title" placeholder="Es. Meal prep della settimana" /></label>
+          <label>Descrizione / note<textarea name="summary" rows={3} placeholder="Es. Preparare i pranzi per i prossimi cinque giorni" /></label>
           <div className="form-grid">
             <label>Area<select name="area" defaultValue="Casa">{areas.map((area) => <option value={area.name} key={area.name}>{area.name}</option>)}</select></label>
             <label>Epica<input name="epic" placeholder="Es. Cucina" /></label>
             <label>Assegna allo sprint<select name="sprint" defaultValue=""><option value="">Backlog non assegnato</option>{sprintOptions.map((sprint) => <option value={sprint} key={sprint}>Sprint {sprint}{sprint === selectedSprint ? " · selezionato" : ""}</option>)}</select></label>
           </div>
           <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit"><Plus size={17} /> Crea storia</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function StorySummaryDialog({ story, onClose, onSave }: { story: Story; onClose: () => void; onSave: (storyId: string, summary: string) => void }) {
+  const [summary, setSummary] = useState(story.summary);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(story.id, summary.trim());
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="item-dialog" role="dialog" aria-modal="true" aria-labelledby="story-summary-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><h2 id="story-summary-title">Descrizione della storia</h2><p className="dialog-context">{story.title}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi finestra"><X size={19} /></button></header>
+        <form onSubmit={submit}>
+          <label>Descrizione / note<textarea autoFocus name="summary" rows={6} value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="Aggiungi contesto, obiettivo o note utili per questa storia" /></label>
+          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit">Salva descrizione</button></footer>
         </form>
       </section>
     </div>
@@ -366,7 +396,7 @@ function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: T
   );
 }
 
-function Backlog({ stories, onAssignSprint, onDelete }: { stories: Story[]; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void }) {
+function Backlog({ stories, onAssignSprint, onDelete, onEditSummary }: { stories: Story[]; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void; onEditSummary: (storyId: string) => void }) {
   function confirmDelete(story: Story) {
     if (window.confirm(`Eliminare definitivamente la storia “${story.title}” e le sue ${story.tasks.length} task?`)) onDelete(story.id);
   }
@@ -382,6 +412,8 @@ function Backlog({ stories, onAssignSprint, onDelete }: { stories: Story[]; onAs
             <div className="backlog-story-main">
               <p><span className="area-label"><span />{story.area}</span><span className="story-epic">{story.epic}</span></p>
               <h2>{story.title}</h2>
+              {story.summary && <p className="backlog-story-summary">{story.summary}</p>}
+              <button className="edit-story-notes" type="button" onClick={() => onEditSummary(story.id)}>{story.summary ? "Modifica descrizione" : "Aggiungi descrizione"}</button>
               <small>{story.tasks.length} task <span className="story-point-value"><Sparkles size={12} /> {formatPoints(points)} punti</span></small>
             </div>
             <div className="backlog-story-actions"><label className="sprint-assignment">Sprint<select value={story.sprint ?? ""} onChange={(event) => onAssignSprint(story.id, event.target.value ? Number(event.target.value) : null)}><option value="">Backlog non assegnato</option>{sprintOptions.map((sprint) => <option value={sprint} key={sprint}>Sprint {sprint} · {sprintDateRange(sprint)}</option>)}</select></label><button className="delete-story-button" type="button" onClick={() => confirmDelete(story)} aria-label={`Elimina ${story.title}`}><Trash2 size={16} /> Elimina</button></div>
@@ -429,6 +461,7 @@ export function Dashboard() {
   const [selectedSprint, setSelectedSprint] = useState(defaultSprint);
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(false);
+  const [storySummaryId, setStorySummaryId] = useState<string | null>(null);
   const [capacityPlan, setCapacityPlan] = useState<CapacityPlan>(initialCapacityPlan);
   const [isReady, setIsReady] = useState(false);
 
@@ -483,6 +516,7 @@ export function Dashboard() {
     const task = story?.tasks.find((candidate) => candidate.id === selectedTask.taskId);
     return story && task ? { story, task } : null;
   })() : null;
+  const storyForSummary = storySummaryId ? stories.find((story) => story.id === storySummaryId) ?? null : null;
 
   function updateTask(storyId: string, task: Task) {
     setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.map((candidate) => candidate.id === task.id ? task : candidate) } : story));
@@ -509,6 +543,12 @@ export function Dashboard() {
   function deleteStory(storyId: string) {
     setStories((current) => current.filter((story) => story.id !== storyId));
     setSelectedTask((current) => current?.storyId === storyId ? null : current);
+    setStorySummaryId((current) => current === storyId ? null : current);
+  }
+
+  function updateStorySummary(storyId: string, summary: string) {
+    setStories((current) => current.map((story) => story.id === storyId ? { ...story, summary } : story));
+    setStorySummaryId(null);
   }
 
   function handleDragStart(event: { active: { id: string | number } }) {
@@ -549,7 +589,7 @@ export function Dashboard() {
               <div className="board-scroll">
                 <section className="taskboard" aria-label={`Taskboard dello sprint ${selectedSprint}`}>
                   <header className="taskboard-header"><span>Storia</span>{columns.map((column) => <span key={column.id}>{column.title}</span>)}</header>
-                  {boardStories.map((story) => <section className="story-row" key={story.id}><StorySummary story={story} onClose={closeStory} />{columns.map((column) => <TaskCell storyId={story.id} status={column.id} key={column.id}>{story.tasks.filter((task) => task.status === column.id).map((task) => <TaskCard key={task.id} task={task} story={story} onOpen={setSelectedTask} />)}</TaskCell>)}</section>)}
+                  {boardStories.map((story) => <section className="story-row" key={story.id}><StorySummary story={story} onClose={closeStory} onEditSummary={setStorySummaryId} />{columns.map((column) => <TaskCell storyId={story.id} status={column.id} key={column.id}>{story.tasks.filter((task) => task.status === column.id).map((task) => <TaskCard key={task.id} task={task} story={story} onOpen={setSelectedTask} />)}</TaskCell>)}</section>)}
                   {boardStories.length === 0 && <p className="empty-board">Non ci sono storie assegnate allo Sprint {selectedSprint} per questa area.</p>}
                 </section>
               </div>
@@ -557,13 +597,14 @@ export function Dashboard() {
             </DndContext>
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
-            <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} />
+            <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditSummary={setStorySummaryId} />
           </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={setCapacityPlan} />}
         </div>
       </section>
 
       {isNewTaskOpen && <NewTaskDialog stories={boardStories} onClose={() => setIsNewTaskOpen(false)} onCreate={createTask} />}
       {isNewStoryOpen && <NewStoryDialog selectedSprint={selectedSprint} onClose={() => setIsNewStoryOpen(false)} onCreate={createStory} />}
+      {storyForSummary && <StorySummaryDialog story={storyForSummary} onClose={() => setStorySummaryId(null)} onSave={updateStorySummary} />}
       {details && <TaskDetails story={details.story} task={details.task} onClose={() => setSelectedTask(null)} onUpdate={(task) => updateTask(details.story.id, task)} />}
     </main>
   );

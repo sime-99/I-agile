@@ -144,9 +144,10 @@ Capacità: 12 h | Completato: 8,5 h | 14 punti
 5. Creazione dei relativi task per una settimana/sprint.
 6. Board con storie fisse a sinistra e task in `To do` / `In progress` / `Done` con drag & drop.
 7. Stima ore e ore effettive sulle task; punti della storia calcolati automaticamente dalle stime.
-8. Riepilogo della settimana: capacità, ore completate e punti completati.
-9. Chiusura/archiviazione esplicita delle storie e cancellazione dal Backlog con conferma.
-10. Capacity settimanale: conto a scalare delle 168 ore, con voci modificabili per sonno, lavoro, viaggi, visite e uscite sociali.
+8. Descrizione / note facoltative per ogni storia, visibili nella board e nel backlog.
+9. Riepilogo della settimana: capacità, ore completate e punti completati.
+10. Chiusura/archiviazione esplicita delle storie e cancellazione dal Backlog con conferma.
+11. Capacity settimanale: conto a scalare delle 168 ore, con voci modificabili per sonno, lavoro, viaggi, visite e uscite sociali.
 
 ### Esplicitamente fuori dall'MVP
 
