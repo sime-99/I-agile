@@ -8,6 +8,7 @@ import {
   Clock3,
   Dumbbell,
   FolderKanban,
+  GraduationCap,
   GripVertical,
   House,
   ListChecks,
@@ -23,7 +24,12 @@ import { FormEvent, ReactNode, useEffect, useMemo, useState, type CSSProperties 
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Status = "todo" | "in_progress" | "done";
-type Area = "Casa" | "Salute e fitness" | "Progetti" | "Amministrazione";
+type Area =
+  | "Casa"
+  | "Salute e fitness"
+  | "Formazione"
+  | "Progetti"
+  | "Amministrazione";
 type View = "board" | "backlog" | "capacity";
 type CloudStatus = "local" | "loading" | "saving" | "saved" | "error";
 
@@ -60,6 +66,7 @@ type SelectedTask = { storyId: string; taskId: string };
 const areas: Array<{ name: Area; icon: typeof House; color: string }> = [
   { name: "Casa", icon: House, color: "var(--area-home)" },
   { name: "Salute e fitness", icon: Dumbbell, color: "var(--area-health)" },
+  { name: "Formazione", icon: GraduationCap, color: "var(--area-learning)" },
   { name: "Progetti", icon: FolderKanban, color: "var(--area-projects)" },
   { name: "Amministrazione", icon: ListChecks, color: "var(--area-admin)" },
 ];

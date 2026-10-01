@@ -83,6 +83,7 @@ Il primo set deve restare operativo e compatto; non è prevista un'area separata
 - Salute e fitness
   - Gym
   - Alimentazione e recupero
+- Formazione
 - Progetti
   - I-AGILE
 - Amministrazione
