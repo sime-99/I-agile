@@ -4,22 +4,28 @@ import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable } fro
 import {
   CalendarDays,
   Check,
+  Cloud,
   Clock3,
   Dumbbell,
   FolderKanban,
   GripVertical,
   House,
   ListChecks,
+  LogIn,
+  LogOut,
   Plus,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 import { FormEvent, ReactNode, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Status = "todo" | "in_progress" | "done";
 type Area = "Casa" | "Salute e fitness" | "Progetti" | "Amministrazione";
 type View = "board" | "backlog" | "capacity";
+type CloudStatus = "local" | "loading" | "saving" | "saved" | "error";
 
 type CapacityPlan = {
   sleepHours: number;
@@ -193,13 +199,25 @@ function normaliseHours(value: unknown, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function normaliseCapacityPlan(value: Partial<CapacityPlan> | null | undefined): CapacityPlan {
+  return {
+    sleepHours: normaliseHours(value?.sleepHours, initialCapacityPlan.sleepHours),
+    workHoursPerDay: normaliseHours(value?.workHoursPerDay, initialCapacityPlan.workHoursPerDay),
+    workDays: normaliseHours(value?.workDays, initialCapacityPlan.workDays),
+    travelHours: normaliseHours(value?.travelHours, initialCapacityPlan.travelHours),
+    appointmentHours: normaliseHours(value?.appointmentHours, initialCapacityPlan.appointmentHours),
+    socialHours: normaliseHours(value?.socialHours, initialCapacityPlan.socialHours),
+  };
+}
+
 function normaliseSprint(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= sprintCount ? parsed : fallback;
 }
 
 function migrateLegacyItems(value: unknown, fallbackSprint: number): Story[] | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
+  if (!Array.isArray(value)) return null;
+  if (value.length === 0) return [];
   const first = value[0] as Record<string, unknown>;
 
   if (Array.isArray(first.tasks)) {
@@ -378,6 +396,38 @@ function StorySummaryDialog({ story, onClose, onSave }: { story: Story; onClose:
   );
 }
 
+function SignInDialog({ onClose }: { onClose: () => void }) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !email.trim()) return;
+    setIsSubmitting(true);
+    setMessage("");
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setIsSubmitting(false);
+    setMessage(error ? "Non è stato possibile inviare il link. Riprova." : "Controlla la tua email e apri il link per accedere.");
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="item-dialog sign-in-dialog" role="dialog" aria-modal="true" aria-labelledby="sign-in-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><h2 id="sign-in-title">Accedi a I-AGILE</h2><p className="dialog-context">I tuoi dati saranno salvati in modo privato e sincronizzati.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi finestra"><X size={19} /></button></header>
+        <form onSubmit={submit}>
+          <label>Email<input autoFocus name="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@email.com" required /></label>
+          {message && <p className="form-message">{message}</p>}
+          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit" disabled={isSubmitting}><LogIn size={17} /> {isSubmitting ? "Invio…" : "Invia link"}</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: Task; onClose: () => void; onUpdate: (task: Task) => void }) {
   function updateActual(value: string) { onUpdate({ ...task, actualMinutes: Math.max(0, Number(value) || 0) }); }
   function updateStatus(status: Status) { onUpdate({ ...task, status }); }
@@ -464,6 +514,10 @@ export function Dashboard() {
   const [storySummaryId, setStorySummaryId] = useState<string | null>(null);
   const [capacityPlan, setCapacityPlan] = useState<CapacityPlan>(initialCapacityPlan);
   const [isReady, setIsReady] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [cloudUserId, setCloudUserId] = useState<string | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus>("local");
+  const [isSignInOpen, setIsSignInOpen] = useState(false);
 
   useEffect(() => {
     const storedBoard = window.localStorage.getItem("i-agile-board");
@@ -476,15 +530,7 @@ export function Dashboard() {
     }
     if (storedCapacityPlan) {
       try {
-        const restoredPlan = JSON.parse(storedCapacityPlan) as Partial<CapacityPlan>;
-        setCapacityPlan({
-          sleepHours: normaliseHours(restoredPlan.sleepHours, initialCapacityPlan.sleepHours),
-          workHoursPerDay: normaliseHours(restoredPlan.workHoursPerDay, initialCapacityPlan.workHoursPerDay),
-          workDays: normaliseHours(restoredPlan.workDays, initialCapacityPlan.workDays),
-          travelHours: normaliseHours(restoredPlan.travelHours, initialCapacityPlan.travelHours),
-          appointmentHours: normaliseHours(restoredPlan.appointmentHours, initialCapacityPlan.appointmentHours),
-          socialHours: normaliseHours(restoredPlan.socialHours, initialCapacityPlan.socialHours),
-        });
+        setCapacityPlan(normaliseCapacityPlan(JSON.parse(storedCapacityPlan) as Partial<CapacityPlan>));
       } catch { /* Keep the initial capacity plan when stored data is malformed. */ }
     }
     setIsReady(true);
@@ -497,6 +543,67 @@ export function Dashboard() {
   useEffect(() => {
     if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(capacityPlan));
   }, [capacityPlan, isReady]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let isMounted = true;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (isMounted) setUser(data.user);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setCloudUserId(null);
+    });
+    return () => {
+      isMounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !user || !isReady) {
+      setCloudUserId(null);
+      setCloudStatus("local");
+      return;
+    }
+    let isMounted = true;
+    setCloudStatus("loading");
+    void (async () => {
+      const { data, error } = await supabase.from("app_states").select("stories, capacity_plan").eq("user_id", user.id).maybeSingle();
+      if (!isMounted) return;
+      if (error) {
+        setCloudStatus("error");
+        return;
+      }
+      if (data) {
+        const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
+        if (restoredStories) setStories(restoredStories);
+        setCapacityPlan(normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>));
+      } else {
+        const { error: createError } = await supabase.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan });
+        if (!isMounted) return;
+        if (createError) {
+          setCloudStatus("error");
+          return;
+        }
+      }
+      setCloudUserId(user.id);
+      setCloudStatus("saved");
+    })();
+    return () => { isMounted = false; };
+  }, [user?.id, isReady]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !user || !isReady || cloudUserId !== user.id) return;
+    const timeout = window.setTimeout(() => {
+      setCloudStatus("saving");
+      void client.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan }).then(({ error }) => {
+        setCloudStatus(error ? "error" : "saved");
+      });
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [stories, capacityPlan, user?.id, cloudUserId, isReady]);
 
   const visibleStories = useMemo(() => stories.filter((story) => !story.closed && (selectedArea === "Tutte" || story.area === selectedArea)), [stories, selectedArea]);
   const boardStories = useMemo(() => visibleStories.filter((story) => story.sprint === selectedSprint), [visibleStories, selectedSprint]);
@@ -511,6 +618,7 @@ export function Dashboard() {
   const remainingSprintPoints = Math.max(0, sprintPointCapacity - totalSprintPoints);
   const capacityMinutes = availableHours * 60;
   const completionPercent = capacityMinutes > 0 ? Math.min(100, Math.round((completedMinutes / capacityMinutes) * 100)) : 0;
+  const cloudStatusLabel = cloudStatus === "loading" ? "Caricamento" : cloudStatus === "saving" ? "Salvataggio" : cloudStatus === "saved" ? "Salvato" : cloudStatus === "error" ? "Errore sync" : "Solo locale";
   const details = selectedTask ? (() => {
     const story = stories.find((candidate) => candidate.id === selectedTask.storyId);
     const task = story?.tasks.find((candidate) => candidate.id === selectedTask.taskId);
@@ -551,6 +659,13 @@ export function Dashboard() {
     setStorySummaryId(null);
   }
 
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setUser(null);
+    setCloudUserId(null);
+  }
+
   function handleDragStart(event: { active: { id: string | number } }) {
     const [, storyId, taskId] = String(event.active.id).split(":");
     const story = stories.find((candidate) => candidate.id === storyId);
@@ -575,6 +690,7 @@ export function Dashboard() {
           <div className="top-brand"><span className="brand-mark"><span /><span /><span /></span><span>I-AGILE</span></div>
           <nav className="top-navigation" aria-label="Navigazione principale"><button className={`top-nav-button${view === "board" ? " selected" : ""}`} type="button" onClick={() => setView("board")}><CalendarDays size={15} /> Taskboard</button><button className={`top-nav-button${view === "backlog" ? " selected" : ""}`} type="button" onClick={() => setView("backlog")}><ListChecks size={15} /> Backlog</button><button className={`top-nav-button${view === "capacity" ? " selected" : ""}`} type="button" onClick={() => setView("capacity")}><Clock3 size={15} /> Capacity</button></nav>
           {view !== "capacity" && <label className="area-filter-control">Area<select value={selectedArea} onChange={(event) => setSelectedArea(event.target.value as Area | "Tutte")}><option value="Tutte">Tutte le aree</option>{areas.map((area) => <option value={area.name} key={area.name}>{area.name}</option>)}</select></label>}
+          {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
         </div>
       </header>
 
@@ -605,6 +721,7 @@ export function Dashboard() {
       {isNewTaskOpen && <NewTaskDialog stories={boardStories} onClose={() => setIsNewTaskOpen(false)} onCreate={createTask} />}
       {isNewStoryOpen && <NewStoryDialog selectedSprint={selectedSprint} onClose={() => setIsNewStoryOpen(false)} onCreate={createStory} />}
       {storyForSummary && <StorySummaryDialog story={storyForSummary} onClose={() => setStorySummaryId(null)} onSave={updateStorySummary} />}
+      {isSignInOpen && <SignInDialog onClose={() => setIsSignInOpen(false)} />}
       {details && <TaskDetails story={details.story} task={details.task} onClose={() => setSelectedTask(null)} onUpdate={(task) => updateTask(details.story.id, task)} />}
     </main>
   );
