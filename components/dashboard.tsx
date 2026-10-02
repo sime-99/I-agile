@@ -436,18 +436,35 @@ function SignInDialog({ onClose }: { onClose: () => void }) {
 }
 
 function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: Task; onClose: () => void; onUpdate: (task: Task) => void }) {
-  function updateActual(value: string) { onUpdate({ ...task, actualMinutes: Math.max(0, Number(value) || 0) }); }
-  function updateStatus(status: Status) { onUpdate({ ...task, status }); }
+  const [title, setTitle] = useState(task.title);
+  const [estimateMinutes, setEstimateMinutes] = useState(String(task.estimateMinutes));
+  const [actualMinutes, setActualMinutes] = useState(String(task.actualMinutes || ""));
+  const [status, setStatus] = useState<Status>(task.status);
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onUpdate({
+      ...task,
+      title: title.trim() || task.title,
+      estimateMinutes: Math.max(0, Number(estimateMinutes) || 0),
+      actualMinutes: Math.max(0, Number(actualMinutes) || 0),
+      status,
+    });
+    onClose();
+  }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <aside className="detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-details-title" onMouseDown={(event) => event.stopPropagation()}>
         <header><div className="detail-context"><span>{story.title}</span><p>{story.area} · {story.epic}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi dettagli"><X size={19} /></button></header>
-        <h2 id="task-details-title">{task.title}</h2>
-        <div className="detail-metrics detail-estimate"><div><span>Stima</span><strong><Clock3 size={16} /> {duration(task.estimateMinutes)}</strong></div></div>
-        <label className="status-field">Stato<select value={task.status} onChange={(event) => updateStatus(event.target.value as Status)}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select></label>
-        <label className="status-field">Tempo effettivo (minuti)<input type="number" min="0" value={task.actualMinutes || ""} placeholder="0" onChange={(event) => updateActual(event.target.value)} /></label>
-        <footer><button className="button button-secondary" type="button" onClick={onClose}>Chiudi</button>{task.status !== "done" && <button className="button button-primary" type="button" onClick={() => updateStatus("done")}><Check size={17} /> Segna completato</button>}</footer>
+        <form className="task-edit-form" onSubmit={save}>
+          <h2 id="task-details-title">Modifica task</h2>
+          <label className="status-field">Nome task<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+          <label className="status-field">Stima (minuti)<input type="number" min="0" value={estimateMinutes} onChange={(event) => setEstimateMinutes(event.target.value)} /></label>
+          <label className="status-field">Stato<select value={status} onChange={(event) => setStatus(event.target.value as Status)}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select></label>
+          <label className="status-field">Tempo effettivo (minuti)<input type="number" min="0" value={actualMinutes} placeholder="0" onChange={(event) => setActualMinutes(event.target.value)} /></label>
+          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button>{status !== "done" && <button className="button button-secondary" type="button" onClick={() => setStatus("done")}><Check size={17} /> Segna completato</button>}<button className="button button-primary" type="submit">Salva task</button></footer>
+        </form>
       </aside>
     </div>
   );
@@ -603,13 +620,12 @@ export function Dashboard() {
   useEffect(() => {
     const client = supabase;
     if (!client || !user || !isReady || cloudUserId !== user.id) return;
-    const timeout = window.setTimeout(() => {
-      setCloudStatus("saving");
-      void client.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan }).then(({ error }) => {
-        setCloudStatus(error ? "error" : "saved");
-      });
-    }, 400);
-    return () => window.clearTimeout(timeout);
+    let isCurrent = true;
+    setCloudStatus("saving");
+    void client.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan }).then(({ error }) => {
+      if (isCurrent) setCloudStatus(error ? "error" : "saved");
+    });
+    return () => { isCurrent = false; };
   }, [stories, capacityPlan, user?.id, cloudUserId, isReady]);
 
   const visibleStories = useMemo(() => stories.filter((story) => !story.closed && (selectedArea === "Tutte" || story.area === selectedArea)), [stories, selectedArea]);

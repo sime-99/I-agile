@@ -242,7 +242,7 @@ Procedere con **Next.js su Vercel + Supabase**. È la soluzione più semplice pe
 - taskboard con una user story fissa a sinistra per ogni riga e colonne `To do`, `In progress` e `Done`;
 - task figli spostabili con drag & drop soltanto tra le colonne della rispettiva user story;
 - chiusura esplicita della user story dal suo menu: la riga viene nascosta dalla griglia;
-- creazione di nuove task e dettaglio con stato e tempo effettivo;
+- creazione e modifica di task: nome, stima, stato e tempo effettivo;
 - sezione Backlog per creare le storie e assegnarle, o rimuoverle, dagli sprint ISO 1–53;
 - descrizione / note facoltative per ogni storia, modificabili dalla board o dal Backlog;
 - eliminazione definitiva di una storia dal Backlog, insieme alle sue task, dopo una conferma esplicita;
@@ -254,4 +254,4 @@ Procedere con **Next.js su Vercel + Supabase**. È la soluzione più semplice pe
 - riepiloghi aggiornati automaticamente;
 - persistenza temporanea nel browser tramite `localStorage`.
 
-L'integrazione Supabase è pronta nel repository: client browser, accesso con magic link, tabella privata `app_states` e policy RLS. Restano da creare il progetto Supabase, eseguire lo schema SQL e impostare le due variabili pubbliche in locale e su Vercel. Fino a quel momento l'app continua a funzionare solo con `localStorage`.
+L'integrazione Supabase è attiva: client browser, accesso con magic link, tabella privata `app_states` e policy RLS. Storie, task e Capacity vengono sincronizzati subito dopo ogni modifica; il badge `Salvato` conferma il completamento dell'ultima scrittura nel database.
