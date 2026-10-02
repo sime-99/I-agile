@@ -446,7 +446,7 @@ function SignInDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: Task; onClose: () => void; onUpdate: (task: Task) => void }) {
+function TaskDetails({ story, task, onClose, onUpdate, onDelete }: { story: Story; task: Task; onClose: () => void; onUpdate: (task: Task) => void; onDelete: () => void }) {
   const [title, setTitle] = useState(task.title);
   const [estimateMinutes, setEstimateMinutes] = useState(String(task.estimateMinutes));
   const [actualMinutes, setActualMinutes] = useState(String(task.actualMinutes || ""));
@@ -464,6 +464,13 @@ function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: T
     onClose();
   }
 
+  function confirmDelete() {
+    if (window.confirm(`Eliminare definitivamente la task “${task.title}”?`)) {
+      onDelete();
+      onClose();
+    }
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <aside className="detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-details-title" onMouseDown={(event) => event.stopPropagation()}>
@@ -474,7 +481,7 @@ function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: T
           <label className="status-field">Stima (minuti)<input type="number" min="0" value={estimateMinutes} onChange={(event) => setEstimateMinutes(event.target.value)} /></label>
           <label className="status-field">Stato<select value={status} onChange={(event) => setStatus(event.target.value as Status)}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="done">Done</option></select></label>
           <label className="status-field">Tempo effettivo (minuti)<input type="number" min="0" value={actualMinutes} placeholder="0" onChange={(event) => setActualMinutes(event.target.value)} /></label>
-          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button>{status !== "done" && <button className="button button-secondary" type="button" onClick={() => setStatus("done")}><Check size={17} /> Segna completato</button>}<button className="button button-primary" type="submit">Salva task</button></footer>
+          <footer><button className="delete-story-button" type="button" onClick={confirmDelete}><Trash2 size={16} /> Elimina</button><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button>{status !== "done" && <button className="button button-secondary" type="button" onClick={() => setStatus("done")}><Check size={17} /> Segna completato</button>}<button className="button button-primary" type="submit">Salva task</button></footer>
         </form>
       </aside>
     </div>
@@ -669,6 +676,11 @@ export function Dashboard() {
     setIsNewTaskOpen(false);
   }
 
+  function deleteTask(storyId: string, taskId: string) {
+    setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.filter((task) => task.id !== taskId) } : story));
+    setSelectedTask(null);
+  }
+
   function createStory(story: Story) {
     setStories((current) => [...current, story]);
     setIsNewStoryOpen(false);
@@ -755,7 +767,7 @@ export function Dashboard() {
       {isNewStoryOpen && <NewStoryDialog selectedSprint={selectedSprint} onClose={() => setIsNewStoryOpen(false)} onCreate={createStory} />}
       {storyForEdit && <EditStoryDialog story={storyForEdit} onClose={() => setEditingStoryId(null)} onSave={updateStory} />}
       {isSignInOpen && <SignInDialog onClose={() => setIsSignInOpen(false)} />}
-      {details && <TaskDetails story={details.story} task={details.task} onClose={() => setSelectedTask(null)} onUpdate={(task) => updateTask(details.story.id, task)} />}
+      {details && <TaskDetails story={details.story} task={details.task} onClose={() => setSelectedTask(null)} onUpdate={(task) => updateTask(details.story.id, task)} onDelete={() => deleteTask(details.story.id, details.task.id)} />}
     </main>
   );
 }
