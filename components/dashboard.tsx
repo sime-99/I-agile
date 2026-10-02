@@ -291,7 +291,7 @@ function TaskCell({ storyId, status, children }: { storyId: string; status: Stat
   return <div className={`task-cell${isOver ? " is-over" : ""}`} ref={setNodeRef}>{children}</div>;
 }
 
-function StorySummary({ story, onClose, onEditSummary }: { story: Story; onClose: (storyId: string) => void; onEditSummary: (storyId: string) => void }) {
+function StorySummary({ story, onClose, onEditSummary, onEditStory }: { story: Story; onClose: (storyId: string) => void; onEditSummary: (storyId: string) => void; onEditStory: (storyId: string) => void }) {
   const meta = areaMeta(story.area);
   const doneCount = story.tasks.filter((task) => task.status === "done").length;
   const points = storyPoints(story);
@@ -302,8 +302,9 @@ function StorySummary({ story, onClose, onEditSummary }: { story: Story; onClose
       <h2>{story.title}</h2>
       {story.summary ? <p className="story-description">{story.summary}</p> : <button className="story-add-description" type="button" onClick={() => onEditSummary(story.id)}>+ Aggiungi descrizione</button>}
       <p>{doneCount}/{story.tasks.length} task completati <span className="story-point-value"><Sparkles size={12} /> {formatPoints(points)}</span></p>
-      <select className="story-actions" aria-label={`Azioni per ${story.title}`} defaultValue="" onChange={(event) => { if (event.target.value === "close") onClose(story.id); if (event.target.value === "edit-summary") onEditSummary(story.id); event.currentTarget.value = ""; }}>
+      <select className="story-actions" aria-label={`Azioni per ${story.title}`} defaultValue="" onChange={(event) => { if (event.target.value === "close") onClose(story.id); if (event.target.value === "edit-summary") onEditSummary(story.id); if (event.target.value === "edit-story") onEditStory(story.id); event.currentTarget.value = ""; }}>
         <option value="" disabled>Azioni</option>
+        <option value="edit-story">Modifica storia</option>
         <option value="edit-summary">Modifica descrizione</option>
         <option value="close">Chiudi storia</option>
       </select>
@@ -376,6 +377,38 @@ function NewStoryDialog({ selectedSprint, onClose, onCreate }: { selectedSprint:
             <label>Assegna allo sprint<select name="sprint" defaultValue=""><option value="">Backlog non assegnato</option>{sprintOptions.map((sprint) => <option value={sprint} key={sprint}>Sprint {sprint}{sprint === selectedSprint ? " · selezionato" : ""}</option>)}</select></label>
           </div>
           <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit"><Plus size={17} /> Crea storia</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function EditStoryDialog({ story, onClose, onSave }: { story: Story; onClose: () => void; onSave: (story: Story) => void }) {
+  const [title, setTitle] = useState(story.title);
+  const [summary, setSummary] = useState(story.summary);
+  const [area, setArea] = useState<Area>(story.area);
+  const [epic, setEpic] = useState(story.epic);
+  const [sprint, setSprint] = useState(story.sprint ? String(story.sprint) : "");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    onSave({ ...story, title: title.trim(), summary: summary.trim(), area, epic: epic.trim() || "Senza epica", sprint: sprint ? Number(sprint) : null });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="item-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-story-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><h2 id="edit-story-title">Modifica storia</h2><p className="dialog-context">Le task già presenti rimangono nella storia.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi finestra"><X size={19} /></button></header>
+        <form onSubmit={submit}>
+          <label>Titolo<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
+          <label>Descrizione / note<textarea rows={3} value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+          <div className="form-grid">
+            <label>Area<select value={area} onChange={(event) => setArea(event.target.value as Area)}>{areas.map((item) => <option value={item.name} key={item.name}>{item.name}</option>)}</select></label>
+            <label>Epica<input value={epic} onChange={(event) => setEpic(event.target.value)} /></label>
+            <label>Assegna allo sprint<select value={sprint} onChange={(event) => setSprint(event.target.value)}><option value="">Backlog non assegnato</option>{sprintOptions.map((item) => <option value={item} key={item}>Sprint {item}</option>)}</select></label>
+          </div>
+          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit">Salva storia</button></footer>
         </form>
       </section>
     </div>
@@ -470,7 +503,7 @@ function TaskDetails({ story, task, onClose, onUpdate }: { story: Story; task: T
   );
 }
 
-function Backlog({ stories, onAssignSprint, onDelete, onEditSummary }: { stories: Story[]; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void; onEditSummary: (storyId: string) => void }) {
+function Backlog({ stories, onAssignSprint, onDelete, onEditSummary, onEditStory }: { stories: Story[]; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void; onEditSummary: (storyId: string) => void; onEditStory: (storyId: string) => void }) {
   function confirmDelete(story: Story) {
     if (window.confirm(`Eliminare definitivamente la storia “${story.title}” e le sue ${story.tasks.length} task?`)) onDelete(story.id);
   }
@@ -487,6 +520,7 @@ function Backlog({ stories, onAssignSprint, onDelete, onEditSummary }: { stories
               <p><span className="area-label"><span />{story.area}</span><span className="story-epic">{story.epic}</span></p>
               <h2>{story.title}</h2>
               {story.summary && <p className="backlog-story-summary">{story.summary}</p>}
+              <button className="edit-story-notes" type="button" onClick={() => onEditStory(story.id)}>Modifica storia</button>
               <button className="edit-story-notes" type="button" onClick={() => onEditSummary(story.id)}>{story.summary ? "Modifica descrizione" : "Aggiungi descrizione"}</button>
               <small>{story.tasks.length} task <span className="story-point-value"><Sparkles size={12} /> {formatPoints(points)} punti</span></small>
             </div>
@@ -535,6 +569,7 @@ export function Dashboard() {
   const [selectedSprint, setSelectedSprint] = useState(defaultSprint);
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(false);
+  const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
   const [storySummaryId, setStorySummaryId] = useState<string | null>(null);
   const [capacityPlan, setCapacityPlan] = useState<CapacityPlan>(initialCapacityPlan);
   const [isReady, setIsReady] = useState(false);
@@ -648,6 +683,7 @@ export function Dashboard() {
     return story && task ? { story, task } : null;
   })() : null;
   const storyForSummary = storySummaryId ? stories.find((story) => story.id === storySummaryId) ?? null : null;
+  const storyForEdit = editingStoryId ? stories.find((story) => story.id === editingStoryId) ?? null : null;
 
   function updateTask(storyId: string, task: Task) {
     setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.map((candidate) => candidate.id === task.id ? task : candidate) } : story));
@@ -680,6 +716,11 @@ export function Dashboard() {
   function updateStorySummary(storyId: string, summary: string) {
     setStories((current) => current.map((story) => story.id === storyId ? { ...story, summary } : story));
     setStorySummaryId(null);
+  }
+
+  function updateStory(updatedStory: Story) {
+    setStories((current) => current.map((story) => story.id === updatedStory.id ? updatedStory : story));
+    setEditingStoryId(null);
   }
 
   async function signOut() {
@@ -728,7 +769,7 @@ export function Dashboard() {
               <div className="board-scroll">
                 <section className="taskboard" aria-label={`Taskboard dello sprint ${selectedSprint}`}>
                   <header className="taskboard-header"><span>Storia</span>{columns.map((column) => <span key={column.id}>{column.title}</span>)}</header>
-                  {boardStories.map((story) => <section className="story-row" key={story.id}><StorySummary story={story} onClose={closeStory} onEditSummary={setStorySummaryId} />{columns.map((column) => <TaskCell storyId={story.id} status={column.id} key={column.id}>{story.tasks.filter((task) => task.status === column.id).map((task) => <TaskCard key={task.id} task={task} story={story} onOpen={setSelectedTask} />)}</TaskCell>)}</section>)}
+                  {boardStories.map((story) => <section className="story-row" key={story.id}><StorySummary story={story} onClose={closeStory} onEditSummary={setStorySummaryId} onEditStory={setEditingStoryId} />{columns.map((column) => <TaskCell storyId={story.id} status={column.id} key={column.id}>{story.tasks.filter((task) => task.status === column.id).map((task) => <TaskCard key={task.id} task={task} story={story} onOpen={setSelectedTask} />)}</TaskCell>)}</section>)}
                   {boardStories.length === 0 && <p className="empty-board">Non ci sono storie assegnate allo Sprint {selectedSprint} per questa area.</p>}
                 </section>
               </div>
@@ -736,13 +777,14 @@ export function Dashboard() {
             </DndContext>
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
-            <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditSummary={setStorySummaryId} />
+            <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditSummary={setStorySummaryId} onEditStory={setEditingStoryId} />
           </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={setCapacityPlan} />}
         </div>
       </section>
 
       {isNewTaskOpen && <NewTaskDialog stories={boardStories} onClose={() => setIsNewTaskOpen(false)} onCreate={createTask} />}
       {isNewStoryOpen && <NewStoryDialog selectedSprint={selectedSprint} onClose={() => setIsNewStoryOpen(false)} onCreate={createStory} />}
+      {storyForEdit && <EditStoryDialog story={storyForEdit} onClose={() => setEditingStoryId(null)} onSave={updateStory} />}
       {storyForSummary && <StorySummaryDialog story={storyForSummary} onClose={() => setStorySummaryId(null)} onSave={updateStorySummary} />}
       {isSignInOpen && <SignInDialog onClose={() => setIsSignInOpen(false)} />}
       {details && <TaskDetails story={details.story} task={details.task} onClose={() => setSelectedTask(null)} onUpdate={(task) => updateTask(details.story.id, task)} />}

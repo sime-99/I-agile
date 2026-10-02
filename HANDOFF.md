@@ -242,7 +242,7 @@ Procedere con **Next.js su Vercel + Supabase**. È la soluzione più semplice pe
 - taskboard con una user story fissa a sinistra per ogni riga e colonne `To do`, `In progress` e `Done`;
 - task figli spostabili con drag & drop soltanto tra le colonne della rispettiva user story;
 - chiusura esplicita della user story dal suo menu: la riga viene nascosta dalla griglia;
-- creazione e modifica di task: nome, stima, stato e tempo effettivo;
+- creazione e modifica di storie e task: titolo, area, epica, sprint, descrizione, stima, stato e tempo effettivo;
 - sezione Backlog per creare le storie e assegnarle, o rimuoverle, dagli sprint ISO 1–53;
 - descrizione / note facoltative per ogni storia, modificabili dalla board o dal Backlog;
 - eliminazione definitiva di una storia dal Backlog, insieme alle sue task, dopo una conferma esplicita;
