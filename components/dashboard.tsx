@@ -605,7 +605,6 @@ export function Dashboard() {
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      setCloudUserId(null);
     });
     return () => {
       isMounted = false;
