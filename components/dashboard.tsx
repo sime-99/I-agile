@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
-import { FormEvent, ReactNode, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Status = "todo" | "in_progress" | "done";
@@ -560,6 +560,10 @@ export function Dashboard() {
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>("local");
   const [isSignInOpen, setIsSignInOpen] = useState(false);
+  const storiesRef = useRef(stories);
+  const capacityPlanRef = useRef(capacityPlan);
+  const syncQueueRef = useRef(Promise.resolve());
+  const syncRevisionRef = useRef(0);
 
   useEffect(() => {
     const storedBoard = window.localStorage.getItem("i-agile-board");
@@ -567,22 +571,29 @@ export function Dashboard() {
     if (storedBoard) {
       try {
         const restored = migrateLegacyItems(JSON.parse(storedBoard), defaultSprint);
-        if (restored) setStories(restored);
+        if (restored) {
+          storiesRef.current = restored;
+          setStories(restored);
+        }
       } catch { /* Keep useful examples when stored data is malformed. */ }
     }
     if (storedCapacityPlan) {
       try {
-        setCapacityPlan(normaliseCapacityPlan(JSON.parse(storedCapacityPlan) as Partial<CapacityPlan>));
+        const restoredPlan = normaliseCapacityPlan(JSON.parse(storedCapacityPlan) as Partial<CapacityPlan>);
+        capacityPlanRef.current = restoredPlan;
+        setCapacityPlan(restoredPlan);
       } catch { /* Keep the initial capacity plan when stored data is malformed. */ }
     }
     setIsReady(true);
   }, []);
 
   useEffect(() => {
+    storiesRef.current = stories;
     if (isReady) window.localStorage.setItem("i-agile-board", JSON.stringify(stories));
   }, [stories, isReady]);
 
   useEffect(() => {
+    capacityPlanRef.current = capacityPlan;
     if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(capacityPlan));
   }, [capacityPlan, isReady]);
 
@@ -619,10 +630,15 @@ export function Dashboard() {
       }
       if (data) {
         const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
-        if (restoredStories) setStories(restoredStories);
-        setCapacityPlan(normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>));
+        if (restoredStories) {
+          storiesRef.current = restoredStories;
+          setStories(restoredStories);
+        }
+        const restoredPlan = normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>);
+        capacityPlanRef.current = restoredPlan;
+        setCapacityPlan(restoredPlan);
       } else {
-        const { error: createError } = await supabase.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan });
+        const { error: createError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: storiesRef.current, capacity_plan: capacityPlanRef.current });
         if (!isMounted) return;
         if (createError) {
           setCloudStatus("error");
@@ -634,17 +650,6 @@ export function Dashboard() {
     })();
     return () => { isMounted = false; };
   }, [user?.id, isReady]);
-
-  useEffect(() => {
-    const client = supabase;
-    if (!client || !user || !isReady || cloudUserId !== user.id) return;
-    let isCurrent = true;
-    setCloudStatus("saving");
-    void client.from("app_states").upsert({ user_id: user.id, stories, capacity_plan: capacityPlan }).then(({ error }) => {
-      if (isCurrent) setCloudStatus(error ? "error" : "saved");
-    });
-    return () => { isCurrent = false; };
-  }, [stories, capacityPlan, user?.id, cloudUserId, isReady]);
 
   const visibleStories = useMemo(() => stories.filter((story) => !story.closed && (selectedArea === "Tutte" || story.area === selectedArea)), [stories, selectedArea]);
   const boardStories = useMemo(() => visibleStories.filter((story) => story.sprint === selectedSprint), [visibleStories, selectedSprint]);
@@ -667,40 +672,65 @@ export function Dashboard() {
   })() : null;
   const storyForEdit = editingStoryId ? stories.find((story) => story.id === editingStoryId) ?? null : null;
 
+  function syncToCloud(nextStories: Story[], nextCapacityPlan: CapacityPlan) {
+    const client = supabase;
+    if (!client || !user || cloudUserId !== user.id) return;
+    const revision = ++syncRevisionRef.current;
+    setCloudStatus("saving");
+    syncQueueRef.current = syncQueueRef.current.catch(() => undefined).then(async () => {
+      const { error } = await client.from("app_states").upsert({ user_id: user.id, stories: nextStories, capacity_plan: nextCapacityPlan });
+      if (revision === syncRevisionRef.current) setCloudStatus(error ? "error" : "saved");
+    });
+  }
+
+  function commitStories(nextStories: Story[]) {
+    storiesRef.current = nextStories;
+    setStories(nextStories);
+    if (isReady) window.localStorage.setItem("i-agile-board", JSON.stringify(nextStories));
+    syncToCloud(nextStories, capacityPlanRef.current);
+  }
+
+  function commitCapacityPlan(nextPlan: CapacityPlan) {
+    capacityPlanRef.current = nextPlan;
+    setCapacityPlan(nextPlan);
+    if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(nextPlan));
+    syncToCloud(storiesRef.current, nextPlan);
+  }
+
   function updateTask(storyId: string, task: Task) {
-    setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.map((candidate) => candidate.id === task.id ? task : candidate) } : story));
+    commitStories(storiesRef.current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.map((candidate) => candidate.id === task.id ? task : candidate) } : story));
   }
 
   function createTask(storyId: string, task: Task) {
-    setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: [...story.tasks, task] } : story));
+    commitStories(storiesRef.current.map((story) => story.id === storyId ? { ...story, tasks: [...story.tasks, task] } : story));
     setIsNewTaskOpen(false);
   }
 
   function deleteTask(storyId: string, taskId: string) {
-    setStories((current) => current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.filter((task) => task.id !== taskId) } : story));
+    commitStories(storiesRef.current.map((story) => story.id === storyId ? { ...story, tasks: story.tasks.filter((task) => task.id !== taskId) } : story));
     setSelectedTask(null);
   }
 
   function createStory(story: Story) {
-    setStories((current) => [...current, story]);
+    commitStories([...storiesRef.current, story]);
     setIsNewStoryOpen(false);
   }
 
   function closeStory(storyId: string) {
-    setStories((current) => current.map((story) => story.id === storyId ? { ...story, closed: true } : story));
+    commitStories(storiesRef.current.map((story) => story.id === storyId ? { ...story, closed: true } : story));
   }
 
   function assignSprint(storyId: string, sprint: number | null) {
-    setStories((current) => current.map((story) => story.id === storyId ? { ...story, sprint } : story));
+    commitStories(storiesRef.current.map((story) => story.id === storyId ? { ...story, sprint } : story));
   }
 
   function deleteStory(storyId: string) {
-    setStories((current) => current.filter((story) => story.id !== storyId));
+    commitStories(storiesRef.current.filter((story) => story.id !== storyId));
     setSelectedTask((current) => current?.storyId === storyId ? null : current);
   }
 
   function updateStory(updatedStory: Story) {
-    setStories((current) => current.map((story) => story.id === updatedStory.id ? updatedStory : story));
+    commitStories(storiesRef.current.map((story) => story.id === updatedStory.id ? updatedStory : story));
     setEditingStoryId(null);
   }
 
@@ -713,7 +743,7 @@ export function Dashboard() {
 
   function handleDragStart(event: { active: { id: string | number } }) {
     const [, storyId, taskId] = String(event.active.id).split(":");
-    const story = stories.find((candidate) => candidate.id === storyId);
+    const story = storiesRef.current.find((candidate) => candidate.id === storyId);
     setActiveTask(story?.tasks.find((task) => task.id === taskId) ?? null);
   }
 
@@ -723,7 +753,7 @@ export function Dashboard() {
     const [, sourceStoryId, taskId] = String(event.active.id).split(":");
     const [, targetStoryId, destination] = String(event.over.id).split(":");
     if (sourceStoryId !== targetStoryId || !columns.some((column) => column.id === destination)) return;
-    const story = stories.find((candidate) => candidate.id === sourceStoryId);
+    const story = storiesRef.current.find((candidate) => candidate.id === sourceStoryId);
     const task = story?.tasks.find((candidate) => candidate.id === taskId);
     if (task) updateTask(sourceStoryId, { ...task, status: destination as Status });
   }
@@ -759,7 +789,7 @@ export function Dashboard() {
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
             <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
-          </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={setCapacityPlan} />}
+          </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={commitCapacityPlan} />}
         </div>
       </section>
 
