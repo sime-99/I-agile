@@ -15,6 +15,7 @@ import {
   LogIn,
   LogOut,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
   X,
@@ -740,6 +741,35 @@ export function Dashboard() {
     setCloudUserId(null);
   }
 
+  async function refreshFromCloud() {
+    const client = supabase;
+    if (!client || !user || cloudStatus === "loading" || cloudStatus === "saving") return;
+
+    setCloudStatus("loading");
+    const { data, error } = await client.from("app_states").select("stories, capacity_plan").eq("user_id", user.id).maybeSingle();
+
+    if (error) {
+      setCloudStatus("error");
+      return;
+    }
+
+    if (data) {
+      const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
+      if (restoredStories) {
+        storiesRef.current = restoredStories;
+        setStories(restoredStories);
+        window.localStorage.setItem("i-agile-board", JSON.stringify(restoredStories));
+      }
+      const restoredPlan = normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>);
+      capacityPlanRef.current = restoredPlan;
+      setCapacityPlan(restoredPlan);
+      window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(restoredPlan));
+    }
+
+    setCloudUserId(user.id);
+    setCloudStatus("saved");
+  }
+
   function handleDragStart(event: { active: { id: string | number } }) {
     const [, storyId, taskId] = String(event.active.id).split(":");
     const story = storiesRef.current.find((candidate) => candidate.id === storyId);
@@ -764,7 +794,7 @@ export function Dashboard() {
           <div className="top-brand"><span className="brand-mark"><span /><span /><span /></span><span>I-AGILE</span></div>
           <nav className="top-navigation" aria-label="Navigazione principale"><button className={`top-nav-button${view === "board" ? " selected" : ""}`} type="button" onClick={() => setView("board")}><CalendarDays size={15} /> Taskboard</button><button className={`top-nav-button${view === "backlog" ? " selected" : ""}`} type="button" onClick={() => setView("backlog")}><ListChecks size={15} /> Backlog</button><button className={`top-nav-button${view === "capacity" ? " selected" : ""}`} type="button" onClick={() => setView("capacity")}><Clock3 size={15} /> Capacity</button></nav>
           {view !== "capacity" && <label className="area-filter-control">Area<select value={selectedArea} onChange={(event) => setSelectedArea(event.target.value as Area | "Tutte")}><option value="Tutte">Tutte le aree</option>{areas.map((area) => <option value={area.name} key={area.name}>{area.name}</option>)}</select></label>}
-          {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
+          {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={() => void refreshFromCloud()} disabled={cloudStatus === "loading" || cloudStatus === "saving"} title="Ricarica i dati salvati nel cloud"><RefreshCw size={15} /> Aggiorna</button><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
         </div>
       </header>
 
