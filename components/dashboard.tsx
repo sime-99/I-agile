@@ -657,7 +657,7 @@ export function Dashboard() {
   const completedTasks = boardTasks.filter((task) => task.status === "done");
   const plannedMinutes = boardTasks.reduce((total, task) => total + task.estimateMinutes, 0);
   const completedMinutes = completedTasks.reduce((total, task) => total + (task.actualMinutes || task.estimateMinutes), 0);
-  const completedPoints = boardStories.filter((story) => story.tasks.length > 0 && story.tasks.every((task) => task.status === "done")).reduce((total, story) => total + storyPoints(story), 0);
+  const completedPoints = completedTasks.reduce((total, task) => total + task.estimateMinutes / 30, 0);
   const totalSprintPoints = boardStories.reduce((total, story) => total + storyPoints(story), 0);
   const availableHours = hoursInWeek - capacityPlan.sleepHours - (capacityPlan.workHoursPerDay * capacityPlan.workDays) - capacityPlan.travelHours - capacityPlan.appointmentHours - capacityPlan.socialHours;
   const sprintPointCapacity = Math.max(0, availableHours * 2);
