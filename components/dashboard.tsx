@@ -33,14 +33,10 @@ type Area =
   | "Amministrazione";
 type View = "board" | "backlog" | "capacity";
 type CloudStatus = "local" | "loading" | "saving" | "saved" | "error";
+type CapacityCategory = "sleep" | "work" | "social" | "other";
 
 type CapacityPlan = {
-  sleepHours: number;
-  workHoursPerDay: number;
-  workDays: number;
-  travelHours: number;
-  appointmentHours: number;
-  socialHours: number;
+  occupiedSlots: Record<string, CapacityCategory>;
 };
 
 type Task = {
@@ -109,7 +105,14 @@ const sprintCount = isoWeeksInYear(sprintYear);
 const defaultSprint = nextIsoWeek(new Date()).week;
 const sprintOptions = Array.from({ length: sprintCount }, (_, index) => index + 1);
 const hoursInWeek = 168;
-const initialCapacityPlan: CapacityPlan = { sleepHours: 49, workHoursPerDay: 10, workDays: 5, travelHours: 0, appointmentHours: 0, socialHours: 0 };
+const weekDays = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
+const capacityCategories: Array<{ id: CapacityCategory; label: string }> = [
+  { id: "sleep", label: "Sonno" },
+  { id: "work", label: "Lavoro" },
+  { id: "social", label: "Uscite" },
+  { id: "other", label: "Varie" },
+];
+const initialCapacityPlan: CapacityPlan = { occupiedSlots: {} };
 
 const seedStories: Story[] = [
   {
@@ -202,20 +205,31 @@ function normaliseTask(value: Record<string, unknown>): Task {
   };
 }
 
-function normaliseHours(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+function isCapacityCategory(value: unknown): value is CapacityCategory {
+  return capacityCategories.some((category) => category.id === value);
 }
 
-function normaliseCapacityPlan(value: Partial<CapacityPlan> | null | undefined): CapacityPlan {
-  return {
-    sleepHours: normaliseHours(value?.sleepHours, initialCapacityPlan.sleepHours),
-    workHoursPerDay: normaliseHours(value?.workHoursPerDay, initialCapacityPlan.workHoursPerDay),
-    workDays: normaliseHours(value?.workDays, initialCapacityPlan.workDays),
-    travelHours: normaliseHours(value?.travelHours, initialCapacityPlan.travelHours),
-    appointmentHours: normaliseHours(value?.appointmentHours, initialCapacityPlan.appointmentHours),
-    socialHours: normaliseHours(value?.socialHours, initialCapacityPlan.socialHours),
-  };
+function capacitySlotKey(day: number, hour: number) {
+  return `${day}:${hour}`;
+}
+
+function isCapacitySlotKey(value: string) {
+  const [day, hour, ...rest] = value.split(":");
+  const parsedDay = Number(day);
+  const parsedHour = Number(hour);
+  return rest.length === 0 && Number.isInteger(parsedDay) && parsedDay >= 0 && parsedDay < weekDays.length && Number.isInteger(parsedHour) && parsedHour >= 0 && parsedHour < 24;
+}
+
+function normaliseCapacityPlan(value: unknown): CapacityPlan {
+  if (!value || typeof value !== "object") return initialCapacityPlan;
+  const occupiedSlots = (value as { occupiedSlots?: unknown }).occupiedSlots;
+  if (!occupiedSlots || typeof occupiedSlots !== "object" || Array.isArray(occupiedSlots)) return initialCapacityPlan;
+
+  const validSlots: Record<string, CapacityCategory> = {};
+  for (const [slot, category] of Object.entries(occupiedSlots)) {
+    if (isCapacitySlotKey(slot) && isCapacityCategory(category)) validSlots[slot] = category;
+  }
+  return { occupiedSlots: validSlots };
 }
 
 function normaliseSprint(value: unknown, fallback: number) {
@@ -518,28 +532,50 @@ function Backlog({ stories, onAssignSprint, onDelete, onEditStory }: { stories: 
 }
 
 function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: number; onChange: (nextPlan: CapacityPlan) => void }) {
-  const workHours = plan.workHoursPerDay * plan.workDays;
-  const afterSleep = hoursInWeek - plan.sleepHours;
-  const afterWork = afterSleep - workHours;
-  const availableHours = afterWork - plan.travelHours - plan.appointmentHours - plan.socialHours;
+  const [selectedCategory, setSelectedCategory] = useState<CapacityCategory>("sleep");
+  const occupiedHours = Object.keys(plan.occupiedSlots).length;
+  const availableHours = hoursInWeek - occupiedHours;
+  const hoursByCategory = capacityCategories.map((category) => ({
+    ...category,
+    hours: Object.values(plan.occupiedSlots).filter((slotCategory) => slotCategory === category.id).length,
+  }));
 
-  function update(field: keyof CapacityPlan, value: string) {
-    onChange({ ...plan, [field]: normaliseHours(value, 0) });
+  function toggleSlot(day: number, hour: number) {
+    const slot = capacitySlotKey(day, hour);
+    const occupiedSlots = { ...plan.occupiedSlots };
+    if (occupiedSlots[slot] === selectedCategory) delete occupiedSlots[slot];
+    else occupiedSlots[slot] = selectedCategory;
+    onChange({ occupiedSlots });
   }
 
   return (
     <>
       <header className="minimal-header"><div><h1>Capacity</h1><p className="week-meta"><Clock3 size={15} /> Sprint {sprint} · {sprintDateRange(sprint)}</p></div></header>
-      <section className="capacity-ledger" aria-label="Calcolo della capacità settimanale">
-        <div className="ledger-row ledger-start"><div><span>Ore nella settimana</span><small>24 ore × 7 giorni</small></div><strong>{hoursInWeek} h</strong></div>
-        <div className="ledger-row ledger-cost"><div><span>Sonno</span><small>Totale settimanale</small></div><label><span>Ore</span><input aria-label="Ore di sonno settimanali" type="number" min="0" value={plan.sleepHours} onChange={(event) => update("sleepHours", event.target.value)} /></label></div>
-        <div className="ledger-balance"><span>Dopo il sonno</span><strong>{duration(afterSleep * 60)}</strong></div>
-        <div className="ledger-row ledger-cost"><div><span>Lavoro</span><small>Ore al giorno × giorni lavorativi</small></div><div className="work-inputs"><label><span>Ore/giorno</span><input aria-label="Ore di lavoro al giorno" type="number" min="0" value={plan.workHoursPerDay} onChange={(event) => update("workHoursPerDay", event.target.value)} /></label><span>×</span><label><span>Giorni</span><input aria-label="Giorni di lavoro" type="number" min="0" value={plan.workDays} onChange={(event) => update("workDays", event.target.value)} /></label><strong>= {duration(workHours * 60)}</strong></div></div>
-        <div className="ledger-balance"><span>Dopo il lavoro</span><strong>{duration(afterWork * 60)}</strong></div>
-        <div className="ledger-row ledger-cost"><div><span>Viaggi</span><small>Totale settimanale</small></div><label><span>Ore</span><input aria-label="Ore settimanali di viaggio" type="number" min="0" value={plan.travelHours} onChange={(event) => update("travelHours", event.target.value)} /></label></div>
-        <div className="ledger-row ledger-cost"><div><span>Visite</span><small>Mediche, commissioni e appuntamenti</small></div><label><span>Ore</span><input aria-label="Ore settimanali di visite" type="number" min="0" value={plan.appointmentHours} onChange={(event) => update("appointmentHours", event.target.value)} /></label></div>
-        <div className="ledger-row ledger-cost"><div><span>Uscite sociali</span><small>Totale settimanale</small></div><label><span>Ore</span><input aria-label="Ore settimanali di uscite sociali" type="number" min="0" value={plan.socialHours} onChange={(event) => update("socialHours", event.target.value)} /></label></div>
-        <div className={`ledger-result${availableHours < 0 ? " is-negative" : ""}`}><div><span>Ore disponibili</span><small>Capacità residua per lo sprint</small></div><strong>{duration(availableHours * 60)}</strong></div>
+      <section className="capacity-summary" aria-label="Riepilogo della capacità settimanale">
+        <div className="capacity-summary-card"><span>Ore nella settimana</span><strong>{hoursInWeek} h</strong><small>24 ore × 7 giorni</small></div>
+        <div className="capacity-summary-card"><span>Ore impegnate</span><strong>{occupiedHours} h</strong><small>Selezionate nel calendario</small></div>
+        <div className="capacity-summary-card capacity-summary-result"><span>Capacità disponibile</span><strong>{availableHours} h</strong><small>Tempo residuo per lo sprint</small></div>
+      </section>
+      <section className="capacity-planner" aria-labelledby="capacity-planner-title">
+        <div className="capacity-planner-header">
+          <div><h2 id="capacity-planner-title">La tua settimana</h2><p>Seleziona una categoria, poi clicca le celle da un&apos;ora in cui sei impegnato. Per liberare una cella, cliccala di nuovo con la stessa categoria selezionata.</p></div>
+          <div className="capacity-category-picker" role="group" aria-label="Categoria dell&apos;impegno">
+            {capacityCategories.map((category) => <button className={`capacity-category-button is-${category.id}${selectedCategory === category.id ? " selected" : ""}`} type="button" aria-pressed={selectedCategory === category.id} key={category.id} onClick={() => setSelectedCategory(category.id)}><span className="capacity-category-swatch" aria-hidden="true" />{category.label}</button>)}
+          </div>
+        </div>
+        <div className="capacity-calendar-scroll">
+          <table className="capacity-calendar">
+            <caption className="sr-only">Calendario settimanale degli impegni da lunedì a domenica, dalle 00:00 alle 23:00.</caption>
+            <thead><tr><th scope="col">Ora</th>{weekDays.map((day) => <th scope="col" key={day}>{day}</th>)}</tr></thead>
+            <tbody>{Array.from({ length: 24 }, (_, hour) => <tr key={hour}><th scope="row">{String(hour).padStart(2, "0")}:00</th>{weekDays.map((day, dayIndex) => {
+              const slot = capacitySlotKey(dayIndex, hour);
+              const category = plan.occupiedSlots[slot];
+              const categoryLabel = category ? capacityCategories.find((entry) => entry.id === category)?.label : "Libera";
+              return <td key={day}><button className={`capacity-slot${category ? ` is-${category}` : ""}`} type="button" aria-pressed={Boolean(category)} aria-label={`${day}, dalle ${String(hour).padStart(2, "0")}:00 alle ${String(hour + 1).padStart(2, "0")}:00: ${categoryLabel}.`} title={categoryLabel} onClick={() => toggleSlot(dayIndex, hour)} /></td>;
+            })}</tr>)}</tbody>
+          </table>
+        </div>
+        <div className="capacity-breakdown" aria-label="Ore impegnate per categoria">{hoursByCategory.map((category) => <div className={`capacity-breakdown-item is-${category.id}`} key={category.id}><span className="capacity-category-swatch" aria-hidden="true" /><span>{category.label}</span><strong>{category.hours} h</strong></div>)}</div>
       </section>
     </>
   );
@@ -659,7 +695,7 @@ export function Dashboard() {
   const completedMinutes = completedTasks.reduce((total, task) => total + (task.actualMinutes || task.estimateMinutes), 0);
   const completedPoints = completedTasks.reduce((total, task) => total + task.estimateMinutes / 30, 0);
   const totalSprintPoints = boardStories.reduce((total, story) => total + storyPoints(story), 0);
-  const availableHours = hoursInWeek - capacityPlan.sleepHours - (capacityPlan.workHoursPerDay * capacityPlan.workDays) - capacityPlan.travelHours - capacityPlan.appointmentHours - capacityPlan.socialHours;
+  const availableHours = hoursInWeek - Object.keys(capacityPlan.occupiedSlots).length;
   const sprintPointCapacity = Math.max(0, availableHours * 2);
   const remainingSprintPoints = Math.max(0, sprintPointCapacity - totalSprintPoints);
   const capacityMinutes = availableHours * 60;
