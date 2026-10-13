@@ -2,6 +2,7 @@
 
 import { DndContext, DragEndEvent, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/core";
 import {
+  BarChart3,
   CalendarDays,
   Check,
   Cloud,
@@ -31,7 +32,7 @@ type Area =
   | "Formazione"
   | "Progetti"
   | "Amministrazione";
-type View = "board" | "backlog" | "capacity";
+type View = "dashboard" | "board" | "backlog" | "capacity";
 type CloudStatus = "local" | "loading" | "saving" | "saved" | "error";
 type CapacityCategory = "sleep" | "work" | "social" | "other";
 
@@ -431,31 +432,80 @@ function EditStoryDialog({ story, onClose, onSave }: { story: Story; onClose: ()
 
 function SignInDialog({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [isCodeStep, setIsCodeStep] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!supabase || !email.trim()) return;
+  async function requestCode() {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!supabase || !normalizedEmail) return;
     setIsSubmitting(true);
     setMessage("");
     const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      email: normalizedEmail,
     });
     setIsSubmitting(false);
-    setMessage(error ? "Non è stato possibile inviare il link. Riprova." : "Controlla la tua email e apri il link per accedere.");
+    if (error) {
+      setMessage("Non è stato possibile inviare il codice. Riprova.");
+      return;
+    }
+    setCode("");
+    setIsCodeStep(true);
+    setMessage(`Abbiamo inviato un codice a ${normalizedEmail}. Inseriscilo qui per accedere.`);
+  }
+
+  async function submitEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await requestCode();
+  }
+
+  async function verifyCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedCode = code.replace(/\s/g, "");
+    if (!supabase || !normalizedEmail || !normalizedCode) return;
+    setIsVerifyingCode(true);
+    setMessage("");
+    const { error } = await supabase.auth.verifyOtp({
+      email: normalizedEmail,
+      token: normalizedCode,
+      type: "email",
+    });
+    setIsVerifyingCode(false);
+    if (error) {
+      setMessage("Il codice non è valido o è scaduto. Richiedine uno nuovo e riprova.");
+      return;
+    }
+    onClose();
+  }
+
+  function changeEmail() {
+    setCode("");
+    setMessage("");
+    setIsCodeStep(false);
   }
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="item-dialog sign-in-dialog" role="dialog" aria-modal="true" aria-labelledby="sign-in-title" onMouseDown={(event) => event.stopPropagation()}>
         <header><div><h2 id="sign-in-title">Accedi a I-AGILE</h2><p className="dialog-context">I tuoi dati saranno salvati in modo privato e sincronizzati.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Chiudi finestra"><X size={19} /></button></header>
-        <form onSubmit={submit}>
-          <label>Email<input autoFocus name="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@email.com" required /></label>
-          {message && <p className="form-message">{message}</p>}
-          <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit" disabled={isSubmitting}><LogIn size={17} /> {isSubmitting ? "Invio…" : "Invia link"}</button></footer>
-        </form>
+        {isCodeStep ? (
+          <form onSubmit={verifyCode}>
+            <p className="form-message">Inserisci il codice ricevuto via email. Non dovrai aprire alcun link.</p>
+            <label>Codice di accesso<input autoFocus name="one-time-code" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={(event) => setCode(event.target.value.replace(/\s/g, ""))} placeholder="123456" required /></label>
+            {message && <p className="form-message" aria-live="polite">{message}</p>}
+            <footer><button className="button button-secondary" type="button" onClick={changeEmail}>Modifica email</button><button className="button button-primary" type="submit" disabled={isVerifyingCode}><LogIn size={17} /> {isVerifyingCode ? "Verifica…" : "Verifica e accedi"}</button></footer>
+            <button className="story-add-description" type="button" onClick={() => void requestCode()} disabled={isSubmitting}>{isSubmitting ? "Invio…" : "Invia un nuovo codice"}</button>
+          </form>
+        ) : (
+          <form onSubmit={submitEmail}>
+            <label>Email<input autoFocus name="email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@email.com" required /></label>
+            {message && <p className="form-message" aria-live="polite">{message}</p>}
+            <footer><button className="button button-secondary" type="button" onClick={onClose}>Annulla</button><button className="button button-primary" type="submit" disabled={isSubmitting}><LogIn size={17} /> {isSubmitting ? "Invio…" : "Invia codice"}</button></footer>
+          </form>
+        )}
       </section>
     </div>
   );
@@ -576,6 +626,24 @@ function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: numb
           </table>
         </div>
         <div className="capacity-breakdown" aria-label="Ore impegnate per categoria">{hoursByCategory.map((category) => <div className={`capacity-breakdown-item is-${category.id}`} key={category.id}><span className="capacity-category-swatch" aria-hidden="true" /><span>{category.label}</span><strong>{category.hours} h</strong></div>)}</div>
+      </section>
+    </>
+  );
+}
+
+function SprintDashboard({ sprint, plannedPoints, completedPoints, onSprintChange }: { sprint: number; plannedPoints: number; completedPoints: number; onSprintChange: (sprint: number) => void }) {
+  const hasPlannedPoints = plannedPoints > 0;
+  const completionPercent = hasPlannedPoints ? Math.min(100, Math.round((completedPoints / plannedPoints) * 100)) : 0;
+
+  return (
+    <>
+      <header className="minimal-header"><div><div className="sprint-heading"><h1>Dashboard</h1><select aria-label="Seleziona sprint per la dashboard" value={sprint} onChange={(event) => onSprintChange(Number(event.target.value))}>{sprintOptions.map((option) => <option value={option} key={option}>Sprint {option}</option>)}</select></div><p className="week-meta"><BarChart3 size={15} /> Sprint {sprint} · {sprintDateRange(sprint)}</p></div></header>
+      <section className="dashboard-chart" aria-labelledby="points-chart-title">
+        <div className="dashboard-chart-header"><div><p className="dashboard-chart-kicker">Avanzamento sprint</p><h2 id="points-chart-title">Punti completati rispetto ai pianificati</h2><p>Il calcolo include tutte le task completate, anche se la storia non è ancora chiusa.</p></div><strong className="dashboard-chart-percent">{completionPercent}%</strong></div>
+        <div className="dashboard-bars" role="img" aria-label={`${formatPoints(completedPoints)} punti completati su ${formatPoints(plannedPoints)} punti pianificati, ${completionPercent} per cento completato.`}>
+          <div className="dashboard-bar-row"><div className="dashboard-bar-label"><span>Pianificati</span><strong>{formatPoints(plannedPoints)} punti</strong></div><div className="dashboard-bar-track"><span className="dashboard-bar dashboard-bar-planned" style={{ width: hasPlannedPoints ? "100%" : "0%" }} /></div><strong className="dashboard-bar-percent">{hasPlannedPoints ? "100%" : "0%"}</strong></div>
+          <div className="dashboard-bar-row"><div className="dashboard-bar-label"><span>Completati</span><strong>{formatPoints(completedPoints)} punti</strong></div><div className="dashboard-bar-track"><span className="dashboard-bar dashboard-bar-completed" style={{ width: `${completionPercent}%` }} /></div><strong className="dashboard-bar-percent">{completionPercent}%</strong></div>
+        </div>
       </section>
     </>
   );
@@ -827,8 +895,8 @@ export function Dashboard() {
     <main className="app-shell">
       <header className="topbar">
         <div className="topbar-inner">
-          <div className="top-brand"><span className="brand-mark"><span /><span /><span /></span><span>I-AGILE</span></div>
-          <nav className="top-navigation" aria-label="Navigazione principale"><button className={`top-nav-button${view === "board" ? " selected" : ""}`} type="button" onClick={() => setView("board")}><CalendarDays size={15} /> Taskboard</button><button className={`top-nav-button${view === "backlog" ? " selected" : ""}`} type="button" onClick={() => setView("backlog")}><ListChecks size={15} /> Backlog</button><button className={`top-nav-button${view === "capacity" ? " selected" : ""}`} type="button" onClick={() => setView("capacity")}><Clock3 size={15} /> Capacity</button></nav>
+          <div className="top-brand"><span className="brand-mark" aria-hidden="true"><span /><span /><span /><span /></span><span>I-AGILE</span></div>
+          <nav className="top-navigation" aria-label="Navigazione principale"><button className={`top-nav-button${view === "dashboard" ? " selected" : ""}`} type="button" onClick={() => setView("dashboard")}><BarChart3 size={15} /> Dashboard</button><button className={`top-nav-button${view === "board" ? " selected" : ""}`} type="button" onClick={() => setView("board")}><CalendarDays size={15} /> Taskboard</button><button className={`top-nav-button${view === "backlog" ? " selected" : ""}`} type="button" onClick={() => setView("backlog")}><ListChecks size={15} /> Backlog</button><button className={`top-nav-button${view === "capacity" ? " selected" : ""}`} type="button" onClick={() => setView("capacity")}><Clock3 size={15} /> Capacity</button></nav>
           {view !== "capacity" && <label className="area-filter-control">Area<select value={selectedArea} onChange={(event) => setSelectedArea(event.target.value as Area | "Tutte")}><option value="Tutte">Tutte le aree</option>{areas.map((area) => <option value={area.name} key={area.name}>{area.name}</option>)}</select></label>}
           {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={() => void refreshFromCloud()} disabled={cloudStatus === "loading" || cloudStatus === "saving"} title="Ricarica i dati salvati nel cloud"><RefreshCw size={15} /> Aggiorna</button><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
         </div>
@@ -836,7 +904,7 @@ export function Dashboard() {
 
       <section className="workspace">
         <div className="content">
-          {view === "board" ? <>
+          {view === "dashboard" ? <SprintDashboard sprint={selectedSprint} plannedPoints={totalSprintPoints} completedPoints={completedPoints} onSprintChange={setSelectedSprint} /> : view === "board" ? <>
             <header className="minimal-header"><div><div className="sprint-heading"><h1>Sprint {selectedSprint}</h1><select aria-label="Seleziona sprint" value={selectedSprint} onChange={(event) => setSelectedSprint(Number(event.target.value))}>{sprintOptions.map((sprint) => <option value={sprint} key={sprint}>Sprint {sprint}</option>)}</select></div><p className="week-meta"><CalendarDays size={15} /> {sprintDateRange(selectedSprint)} <span>·</span> {duration(capacityMinutes)} disponibili <span>·</span> {duration(completedMinutes)} completate <span>·</span> {formatPoints(completedPoints)} punti</p></div><div className="header-actions"><div className="sprint-points" aria-label="Punti dello sprint"><div><span>Punti totali</span><strong>{formatPoints(totalSprintPoints)}</strong></div><div><span>Punti rimanenti</span><strong>{formatPoints(remainingSprintPoints)}</strong><small>su {formatPoints(sprintPointCapacity)}</small></div></div><button className="button button-primary add-button" type="button" disabled={boardStories.length === 0} onClick={() => setIsNewTaskOpen(true)}><Plus size={18} /> Aggiungi task</button></div></header>
 
             <section className="summary-strip" aria-label="Riepilogo dello sprint"><div className="summary-main"><span>Capacità</span><strong>{duration(capacityMinutes)}</strong></div><div className="summary-main"><span>Pianificato</span><strong>{duration(plannedMinutes)}</strong><small>{plannedMinutes > capacityMinutes ? "Oltre la capacità" : "Entro la capacità"}</small></div><div className="summary-main"><span>Completato</span><strong>{duration(completedMinutes)}</strong><div className="progress-track"><span style={{ width: `${completionPercent}%` }} /></div></div><div className="summary-main points-summary"><span>Punti completati</span><strong><Sparkles size={19} /> {formatPoints(completedPoints)}</strong></div></section>
