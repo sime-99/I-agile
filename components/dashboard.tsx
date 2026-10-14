@@ -40,6 +40,8 @@ type CapacityPlan = {
   occupiedSlots: Record<string, CapacityCategory>;
 };
 
+type CapacityPlans = Record<string, CapacityPlan>;
+
 type Task = {
   id: string;
   title: string;
@@ -231,6 +233,23 @@ function normaliseCapacityPlan(value: unknown): CapacityPlan {
     if (isCapacitySlotKey(slot) && isCapacityCategory(category)) validSlots[slot] = category;
   }
   return { occupiedSlots: validSlots };
+}
+
+function normaliseCapacityPlans(value: unknown): CapacityPlans {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const rawPlans = value as Record<string, unknown>;
+
+  if (Object.hasOwn(rawPlans, "occupiedSlots")) {
+    const legacyPlan = normaliseCapacityPlan(rawPlans);
+    return Object.keys(legacyPlan.occupiedSlots).length > 0 ? { [String(defaultSprint)]: legacyPlan } : {};
+  }
+
+  const plans: CapacityPlans = {};
+  for (const [sprint, plan] of Object.entries(rawPlans)) {
+    const parsedSprint = Number(sprint);
+    if (Number.isInteger(parsedSprint) && parsedSprint >= 1 && parsedSprint <= sprintCount) plans[String(parsedSprint)] = normaliseCapacityPlan(plan);
+  }
+  return plans;
 }
 
 function normaliseSprint(value: unknown, fallback: number) {
@@ -698,14 +717,14 @@ export function Dashboard() {
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(false);
   const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
-  const [capacityPlan, setCapacityPlan] = useState<CapacityPlan>(initialCapacityPlan);
+  const [capacityPlans, setCapacityPlans] = useState<CapacityPlans>({});
   const [isReady, setIsReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>("local");
   const [isSignInOpen, setIsSignInOpen] = useState(false);
   const storiesRef = useRef(stories);
-  const capacityPlanRef = useRef(capacityPlan);
+  const capacityPlansRef = useRef(capacityPlans);
   const syncQueueRef = useRef(Promise.resolve());
   const syncRevisionRef = useRef(0);
 
@@ -723,9 +742,9 @@ export function Dashboard() {
     }
     if (storedCapacityPlan) {
       try {
-        const restoredPlan = normaliseCapacityPlan(JSON.parse(storedCapacityPlan) as Partial<CapacityPlan>);
-        capacityPlanRef.current = restoredPlan;
-        setCapacityPlan(restoredPlan);
+        const restoredPlans = normaliseCapacityPlans(JSON.parse(storedCapacityPlan));
+        capacityPlansRef.current = restoredPlans;
+        setCapacityPlans(restoredPlans);
       } catch { /* Keep the initial capacity plan when stored data is malformed. */ }
     }
     setIsReady(true);
@@ -737,9 +756,9 @@ export function Dashboard() {
   }, [stories, isReady]);
 
   useEffect(() => {
-    capacityPlanRef.current = capacityPlan;
-    if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(capacityPlan));
-  }, [capacityPlan, isReady]);
+    capacityPlansRef.current = capacityPlans;
+    if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(capacityPlans));
+  }, [capacityPlans, isReady]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -777,11 +796,11 @@ export function Dashboard() {
           storiesRef.current = restoredStories;
           setStories(restoredStories);
         }
-        const restoredPlan = normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>);
-        capacityPlanRef.current = restoredPlan;
-        setCapacityPlan(restoredPlan);
+        const restoredPlans = normaliseCapacityPlans(data.capacity_plan);
+        capacityPlansRef.current = restoredPlans;
+        setCapacityPlans(restoredPlans);
       } else {
-        const { error: createError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: storiesRef.current, capacity_plan: capacityPlanRef.current });
+        const { error: createError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: storiesRef.current, capacity_plan: capacityPlansRef.current });
         if (!isMounted) return;
         if (createError) {
           setCloudStatus("error");
@@ -802,6 +821,7 @@ export function Dashboard() {
   const completedMinutes = completedTasks.reduce((total, task) => total + (task.actualMinutes || task.estimateMinutes), 0);
   const completedPoints = completedTasks.reduce((total, task) => total + task.estimateMinutes / 30, 0);
   const totalSprintPoints = boardStories.reduce((total, story) => total + storyPoints(story), 0);
+  const capacityPlan = capacityPlans[String(selectedSprint)] ?? initialCapacityPlan;
   const availableHours = hoursInWeek - Object.keys(capacityPlan.occupiedSlots).length;
   const sprintPointCapacity = Math.max(0, availableHours * 2);
   const remainingSprintPoints = Math.max(0, sprintPointCapacity - totalSprintPoints);
@@ -815,13 +835,13 @@ export function Dashboard() {
   })() : null;
   const storyForEdit = editingStoryId ? stories.find((story) => story.id === editingStoryId) ?? null : null;
 
-  function syncToCloud(nextStories: Story[], nextCapacityPlan: CapacityPlan) {
+  function syncToCloud(nextStories: Story[], nextCapacityPlans: CapacityPlans) {
     const client = supabase;
     if (!client || !user || cloudUserId !== user.id) return;
     const revision = ++syncRevisionRef.current;
     setCloudStatus("saving");
     syncQueueRef.current = syncQueueRef.current.catch(() => undefined).then(async () => {
-      const { error } = await client.from("app_states").upsert({ user_id: user.id, stories: nextStories, capacity_plan: nextCapacityPlan });
+      const { error } = await client.from("app_states").upsert({ user_id: user.id, stories: nextStories, capacity_plan: nextCapacityPlans });
       if (revision === syncRevisionRef.current) setCloudStatus(error ? "error" : "saved");
     });
   }
@@ -830,14 +850,15 @@ export function Dashboard() {
     storiesRef.current = nextStories;
     setStories(nextStories);
     if (isReady) window.localStorage.setItem("i-agile-board", JSON.stringify(nextStories));
-    syncToCloud(nextStories, capacityPlanRef.current);
+    syncToCloud(nextStories, capacityPlansRef.current);
   }
 
   function commitCapacityPlan(nextPlan: CapacityPlan) {
-    capacityPlanRef.current = nextPlan;
-    setCapacityPlan(nextPlan);
-    if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(nextPlan));
-    syncToCloud(storiesRef.current, nextPlan);
+    const nextCapacityPlans = { ...capacityPlansRef.current, [String(selectedSprint)]: nextPlan };
+    capacityPlansRef.current = nextCapacityPlans;
+    setCapacityPlans(nextCapacityPlans);
+    if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(nextCapacityPlans));
+    syncToCloud(storiesRef.current, nextCapacityPlans);
   }
 
   function updateTask(storyId: string, task: Task) {
@@ -903,10 +924,10 @@ export function Dashboard() {
         setStories(restoredStories);
         window.localStorage.setItem("i-agile-board", JSON.stringify(restoredStories));
       }
-      const restoredPlan = normaliseCapacityPlan(data.capacity_plan as Partial<CapacityPlan>);
-      capacityPlanRef.current = restoredPlan;
-      setCapacityPlan(restoredPlan);
-      window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(restoredPlan));
+      const restoredPlans = normaliseCapacityPlans(data.capacity_plan);
+      capacityPlansRef.current = restoredPlans;
+      setCapacityPlans(restoredPlans);
+      window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(restoredPlans));
     }
 
     setCloudUserId(user.id);
