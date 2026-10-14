@@ -581,8 +581,11 @@ function Backlog({ stories, onAssignSprint, onDelete, onEditStory }: { stories: 
   );
 }
 
-function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: number; onChange: (nextPlan: CapacityPlan) => void }) {
+function Capacity({ plan, sprint, onChange, onSprintChange }: { plan: CapacityPlan; sprint: number; onChange: (nextPlan: CapacityPlan) => void; onSprintChange: (sprint: number) => void }) {
   const [selectedCategory, setSelectedCategory] = useState<CapacityCategory>("sleep");
+  const occupiedSlotsRef = useRef(plan.occupiedSlots);
+  const isPaintingRef = useRef(false);
+  const paintCategoryRef = useRef<CapacityCategory | null>(null);
   const occupiedHours = Object.keys(plan.occupiedSlots).length;
   const availableHours = hoursInWeek - occupiedHours;
   const hoursByCategory = capacityCategories.map((category) => ({
@@ -590,17 +593,53 @@ function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: numb
     hours: Object.values(plan.occupiedSlots).filter((slotCategory) => slotCategory === category.id).length,
   }));
 
+  useEffect(() => {
+    occupiedSlotsRef.current = plan.occupiedSlots;
+  }, [plan.occupiedSlots]);
+
+  useEffect(() => {
+    function stopPainting() {
+      isPaintingRef.current = false;
+    }
+
+    window.addEventListener("pointerup", stopPainting);
+    window.addEventListener("pointercancel", stopPainting);
+    return () => {
+      window.removeEventListener("pointerup", stopPainting);
+      window.removeEventListener("pointercancel", stopPainting);
+    };
+  }, []);
+
+  function setSlot(day: number, hour: number, category: CapacityCategory | null) {
+    const slot = capacitySlotKey(day, hour);
+    if (occupiedSlotsRef.current[slot] === category) return;
+    const occupiedSlots = { ...occupiedSlotsRef.current };
+    if (category) occupiedSlots[slot] = category;
+    else delete occupiedSlots[slot];
+    occupiedSlotsRef.current = occupiedSlots;
+    onChange({ occupiedSlots });
+  }
+
   function toggleSlot(day: number, hour: number) {
     const slot = capacitySlotKey(day, hour);
-    const occupiedSlots = { ...plan.occupiedSlots };
-    if (occupiedSlots[slot] === selectedCategory) delete occupiedSlots[slot];
-    else occupiedSlots[slot] = selectedCategory;
-    onChange({ occupiedSlots });
+    setSlot(day, hour, occupiedSlotsRef.current[slot] === selectedCategory ? null : selectedCategory);
+  }
+
+  function startPainting(day: number, hour: number) {
+    const slot = capacitySlotKey(day, hour);
+    paintCategoryRef.current = occupiedSlotsRef.current[slot] === selectedCategory ? null : selectedCategory;
+    isPaintingRef.current = true;
+    setSlot(day, hour, paintCategoryRef.current);
+  }
+
+  function continuePainting(day: number, hour: number) {
+    if (!isPaintingRef.current) return;
+    setSlot(day, hour, paintCategoryRef.current);
   }
 
   return (
     <>
-      <header className="minimal-header"><div><h1>Capacity</h1><p className="week-meta"><Clock3 size={15} /> Sprint {sprint} · {sprintDateRange(sprint)}</p></div></header>
+      <header className="minimal-header"><div><div className="sprint-heading"><h1>Capacity</h1><select aria-label="Seleziona sprint per la capacity" value={sprint} onChange={(event) => onSprintChange(Number(event.target.value))}>{sprintOptions.map((option) => <option value={option} key={option}>Sprint {option}</option>)}</select></div><p className="week-meta"><Clock3 size={15} /> Sprint {sprint} · {sprintDateRange(sprint)}</p></div></header>
       <section className="capacity-summary" aria-label="Riepilogo della capacità settimanale">
         <div className="capacity-summary-card"><span>Ore nella settimana</span><strong>{hoursInWeek} h</strong><small>24 ore × 7 giorni</small></div>
         <div className="capacity-summary-card"><span>Ore impegnate</span><strong>{occupiedHours} h</strong><small>Selezionate nel calendario</small></div>
@@ -608,7 +647,7 @@ function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: numb
       </section>
       <section className="capacity-planner" aria-labelledby="capacity-planner-title">
         <div className="capacity-planner-header">
-          <div><h2 id="capacity-planner-title">La tua settimana</h2><p>Seleziona una categoria, poi clicca le celle da un&apos;ora in cui sei impegnato. Per liberare una cella, cliccala di nuovo con la stessa categoria selezionata.</p></div>
+          <div><h2 id="capacity-planner-title">La tua settimana</h2><p>Seleziona una categoria, poi clicca o trascina sulle celle da un&apos;ora in cui sei impegnato. Inizia su una cella già del colore attivo per liberarne più di una in un gesto.</p></div>
           <div className="capacity-category-picker" role="group" aria-label="Categoria dell&apos;impegno">
             {capacityCategories.map((category) => <button className={`capacity-category-button is-${category.id}${selectedCategory === category.id ? " selected" : ""}`} type="button" aria-pressed={selectedCategory === category.id} key={category.id} onClick={() => setSelectedCategory(category.id)}><span className="capacity-category-swatch" aria-hidden="true" />{category.label}</button>)}
           </div>
@@ -621,7 +660,7 @@ function Capacity({ plan, sprint, onChange }: { plan: CapacityPlan; sprint: numb
               const slot = capacitySlotKey(dayIndex, hour);
               const category = plan.occupiedSlots[slot];
               const categoryLabel = category ? capacityCategories.find((entry) => entry.id === category)?.label : "Libera";
-              return <td key={day}><button className={`capacity-slot${category ? ` is-${category}` : ""}`} type="button" aria-pressed={Boolean(category)} aria-label={`${day}, dalle ${String(hour).padStart(2, "0")}:00 alle ${String(hour + 1).padStart(2, "0")}:00: ${categoryLabel}.`} title={categoryLabel} onClick={() => toggleSlot(dayIndex, hour)} /></td>;
+              return <td key={day}><button className={`capacity-slot${category ? ` is-${category}` : ""}`} type="button" aria-pressed={Boolean(category)} aria-label={`${day}, dalle ${String(hour).padStart(2, "0")}:00 alle ${String(hour + 1).padStart(2, "0")}:00: ${categoryLabel}.`} title={categoryLabel} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); startPainting(dayIndex, hour); }} onPointerEnter={() => continuePainting(dayIndex, hour)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleSlot(dayIndex, hour); } }} /></td>;
             })}</tr>)}</tbody>
           </table>
         </div>
@@ -922,7 +961,7 @@ export function Dashboard() {
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
             <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
-          </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={commitCapacityPlan} />}
+          </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={commitCapacityPlan} onSprintChange={setSelectedSprint} />}
         </div>
       </section>
 
