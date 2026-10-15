@@ -105,7 +105,8 @@ function firstDayOfIsoWeek(year: number, week: number) {
 
 const sprintYear = isoWeekInfo(new Date()).year;
 const sprintCount = isoWeeksInYear(sprintYear);
-const defaultSprint = nextIsoWeek(new Date()).week;
+const defaultSprint = isoWeekInfo(new Date()).week;
+const defaultCapacitySprint = nextIsoWeek(new Date()).week;
 const sprintOptions = Array.from({ length: sprintCount }, (_, index) => index + 1);
 const hoursInWeek = 168;
 const weekDays = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
@@ -241,7 +242,7 @@ function normaliseCapacityPlans(value: unknown): CapacityPlans {
 
   if (Object.hasOwn(rawPlans, "occupiedSlots")) {
     const legacyPlan = normaliseCapacityPlan(rawPlans);
-    return Object.keys(legacyPlan.occupiedSlots).length > 0 ? { [String(defaultSprint)]: legacyPlan } : {};
+    return Object.keys(legacyPlan.occupiedSlots).length > 0 ? { [String(defaultCapacitySprint)]: legacyPlan } : {};
   }
 
   const plans: CapacityPlans = {};
@@ -714,6 +715,7 @@ export function Dashboard() {
   const [selectedArea, setSelectedArea] = useState<Area | "Tutte">("Tutte");
   const [view, setView] = useState<View>("board");
   const [selectedSprint, setSelectedSprint] = useState(defaultSprint);
+  const [selectedCapacitySprint, setSelectedCapacitySprint] = useState(defaultCapacitySprint);
   const [isNewTaskOpen, setIsNewTaskOpen] = useState(false);
   const [isNewStoryOpen, setIsNewStoryOpen] = useState(false);
   const [editingStoryId, setEditingStoryId] = useState<string | null>(null);
@@ -821,8 +823,8 @@ export function Dashboard() {
   const completedMinutes = completedTasks.reduce((total, task) => total + (task.actualMinutes || task.estimateMinutes), 0);
   const completedPoints = completedTasks.reduce((total, task) => total + task.estimateMinutes / 30, 0);
   const totalSprintPoints = boardStories.reduce((total, story) => total + storyPoints(story), 0);
-  const capacityPlan = capacityPlans[String(selectedSprint)] ?? initialCapacityPlan;
-  const availableHours = hoursInWeek - Object.keys(capacityPlan.occupiedSlots).length;
+  const taskboardCapacityPlan = capacityPlans[String(selectedSprint)] ?? initialCapacityPlan;
+  const availableHours = hoursInWeek - Object.keys(taskboardCapacityPlan.occupiedSlots).length;
   const sprintPointCapacity = Math.max(0, availableHours * 2);
   const remainingSprintPoints = Math.max(0, sprintPointCapacity - totalSprintPoints);
   const capacityMinutes = availableHours * 60;
@@ -854,7 +856,7 @@ export function Dashboard() {
   }
 
   function commitCapacityPlan(nextPlan: CapacityPlan) {
-    const nextCapacityPlans = { ...capacityPlansRef.current, [String(selectedSprint)]: nextPlan };
+    const nextCapacityPlans = { ...capacityPlansRef.current, [String(selectedCapacitySprint)]: nextPlan };
     capacityPlansRef.current = nextCapacityPlans;
     setCapacityPlans(nextCapacityPlans);
     if (isReady) window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(nextCapacityPlans));
@@ -957,7 +959,7 @@ export function Dashboard() {
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
             <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
-          </> : <Capacity plan={capacityPlan} sprint={selectedSprint} onChange={commitCapacityPlan} onSprintChange={setSelectedSprint} />}
+          </> : <Capacity plan={capacityPlans[String(selectedCapacitySprint)] ?? initialCapacityPlan} sprint={selectedCapacitySprint} onChange={commitCapacityPlan} onSprintChange={setSelectedCapacitySprint} />}
         </div>
       </section>
 
