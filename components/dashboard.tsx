@@ -905,33 +905,8 @@ export function Dashboard() {
     setCloudUserId(null);
   }
 
-  async function refreshFromCloud() {
-    const client = supabase;
-    if (!client || !user || cloudStatus === "loading" || cloudStatus === "saving") return;
-
-    setCloudStatus("loading");
-    const { data, error } = await client.from("app_states").select("stories, capacity_plan").eq("user_id", user.id).maybeSingle();
-
-    if (error) {
-      setCloudStatus("error");
-      return;
-    }
-
-    if (data) {
-      const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
-      if (restoredStories) {
-        storiesRef.current = restoredStories;
-        setStories(restoredStories);
-        window.localStorage.setItem("i-agile-board", JSON.stringify(restoredStories));
-      }
-      const restoredPlans = normaliseCapacityPlans(data.capacity_plan);
-      capacityPlansRef.current = restoredPlans;
-      setCapacityPlans(restoredPlans);
-      window.localStorage.setItem("i-agile-capacity-plan", JSON.stringify(restoredPlans));
-    }
-
-    setCloudUserId(user.id);
-    setCloudStatus("saved");
+  function refreshApplication() {
+    window.location.reload();
   }
 
   function handleDragStart(event: { active: { id: string | number } }) {
@@ -958,7 +933,7 @@ export function Dashboard() {
           <div className="top-brand"><span className="brand-mark" aria-hidden="true"><span /><span /><span /><span /></span><span>I-AGILE</span></div>
           <nav className="top-navigation" aria-label="Navigazione principale"><button className={`top-nav-button${view === "board" ? " selected" : ""}`} type="button" onClick={() => setView("board")}><CalendarDays size={15} /> Taskboard</button><button className={`top-nav-button${view === "backlog" ? " selected" : ""}`} type="button" onClick={() => setView("backlog")}><ListChecks size={15} /> Backlog</button><button className={`top-nav-button${view === "capacity" ? " selected" : ""}`} type="button" onClick={() => setView("capacity")}><Clock3 size={15} /> Capacity</button><button className={`top-nav-button${view === "dashboard" ? " selected" : ""}`} type="button" onClick={() => setView("dashboard")}><BarChart3 size={15} /> Dashboard</button></nav>
           {view !== "capacity" && <label className="area-filter-control">Area<select value={selectedArea} onChange={(event) => setSelectedArea(event.target.value as Area | "Tutte")}><option value="Tutte">Tutte le aree</option>{areas.map((area) => <option value={area.name} key={area.name}>{area.name}</option>)}</select></label>}
-          {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={() => void refreshFromCloud()} disabled={cloudStatus === "loading" || cloudStatus === "saving"} title="Ricarica i dati salvati nel cloud"><RefreshCw size={15} /> Aggiorna</button><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
+          {isSupabaseConfigured && <div className="cloud-account">{user ? <><span className={`cloud-status ${cloudStatus}`} title={cloudStatusLabel}><Cloud size={14} /> {cloudStatusLabel}</span><button className="account-button" type="button" onClick={refreshApplication} title="Aggiorna l'app e scarica l'ultima versione pubblicata"><RefreshCw size={15} /> Aggiorna</button><button className="account-button" type="button" onClick={signOut} title={`Esci da ${user.email ?? "I-AGILE"}`}><LogOut size={15} /> Esci</button></> : <button className="account-button" type="button" onClick={() => setIsSignInOpen(true)}><LogIn size={15} /> Accedi</button>}</div>}
         </div>
       </header>
 
