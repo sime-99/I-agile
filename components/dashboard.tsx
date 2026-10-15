@@ -52,6 +52,7 @@ type Task = {
 
 type Story = {
   id: string;
+  copiedFromStoryId?: string;
   title: string;
   summary: string;
   area: Area;
@@ -269,6 +270,7 @@ function migrateLegacyItems(value: unknown, fallbackSprint: number): Story[] | n
       const hasSprint = Object.prototype.hasOwnProperty.call(story, "sprint");
       return {
         id: String(story.id ?? crypto.randomUUID()),
+        copiedFromStoryId: typeof story.copiedFromStoryId === "string" ? story.copiedFromStoryId : undefined,
         title: String(story.title ?? "Storia senza titolo"),
         summary: String(story.summary ?? story.description ?? story.notes ?? ""),
         area: isArea(story.area) ? story.area : "Casa",
@@ -293,6 +295,29 @@ function migrateLegacyItems(value: unknown, fallbackSprint: number): Story[] | n
     else groups.set(key, { id: `story-${key}`, title: epic, summary: "", area, epic, sprint: fallbackSprint, closed: false, tasks: [task] });
   }
   return [...groups.values()];
+}
+
+function isStoryCompleted(story: Story) {
+  return story.closed || (story.tasks.length > 0 && story.tasks.every((task) => task.status === "done"));
+}
+
+function rollOverIncompleteStories(stories: Story[], targetSprint: number) {
+  const sourceSprint = targetSprint === 1 ? sprintCount : targetSprint - 1;
+  const copiedSourceIds = new Set(stories.filter((story) => story.sprint === targetSprint).map((story) => story.copiedFromStoryId).filter((storyId): storyId is string => Boolean(storyId)));
+  const carriedStories = stories
+    .filter((story) => story.sprint === sourceSprint && !isStoryCompleted(story) && !copiedSourceIds.has(story.id))
+    .map((story) => ({
+      ...story,
+      id: `${story.id}-rollover-${targetSprint}`,
+      copiedFromStoryId: story.id,
+      sprint: targetSprint,
+      closed: false,
+      tasks: story.tasks
+        .filter((task) => task.status !== "done")
+        .map((task) => ({ ...task, id: `${task.id}-rollover-${targetSprint}`, actualMinutes: 0 })),
+    }));
+
+  return carriedStories.length > 0 ? [...stories, ...carriedStories] : stories;
 }
 
 function TaskCard({ task, story, onOpen }: { task: Task; story: Story; onOpen: (selection: SelectedTask) => void }) {
@@ -737,8 +762,9 @@ export function Dashboard() {
       try {
         const restored = migrateLegacyItems(JSON.parse(storedBoard), defaultSprint);
         if (restored) {
-          storiesRef.current = restored;
-          setStories(restored);
+          const rolledOverStories = rollOverIncompleteStories(restored, defaultSprint);
+          storiesRef.current = rolledOverStories;
+          setStories(rolledOverStories);
         }
       } catch { /* Keep useful examples when stored data is malformed. */ }
     }
@@ -795,8 +821,17 @@ export function Dashboard() {
       if (data) {
         const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
         if (restoredStories) {
-          storiesRef.current = restoredStories;
-          setStories(restoredStories);
+          const rolledOverStories = rollOverIncompleteStories(restoredStories, defaultSprint);
+          storiesRef.current = rolledOverStories;
+          setStories(rolledOverStories);
+          if (rolledOverStories.length !== restoredStories.length) {
+            const { error: rolloverError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: rolledOverStories, capacity_plan: normaliseCapacityPlans(data.capacity_plan) });
+            if (!isMounted) return;
+            if (rolloverError) {
+              setCloudStatus("error");
+              return;
+            }
+          }
         }
         const restoredPlans = normaliseCapacityPlans(data.capacity_plan);
         capacityPlansRef.current = restoredPlans;
