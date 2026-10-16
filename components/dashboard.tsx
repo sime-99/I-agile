@@ -301,23 +301,8 @@ function isStoryCompleted(story: Story) {
   return story.closed || (story.tasks.length > 0 && story.tasks.every((task) => task.status === "done"));
 }
 
-function rollOverIncompleteStories(stories: Story[], targetSprint: number) {
-  const sourceSprint = targetSprint === 1 ? sprintCount : targetSprint - 1;
-  const copiedSourceIds = new Set(stories.filter((story) => story.sprint === targetSprint).map((story) => story.copiedFromStoryId).filter((storyId): storyId is string => Boolean(storyId)));
-  const carriedStories = stories
-    .filter((story) => story.sprint === sourceSprint && !isStoryCompleted(story) && !copiedSourceIds.has(story.id))
-    .map((story) => ({
-      ...story,
-      id: `${story.id}-rollover-${targetSprint}`,
-      copiedFromStoryId: story.id,
-      sprint: targetSprint,
-      closed: false,
-      tasks: story.tasks
-        .filter((task) => task.status !== "done")
-        .map((task) => ({ ...task, id: `${task.id}-rollover-${targetSprint}`, actualMinutes: 0 })),
-    }));
-
-  return carriedStories.length > 0 ? [...stories, ...carriedStories] : stories;
+function removeAutomaticRolloverCopies(stories: Story[]) {
+  return stories.filter((story) => !story.copiedFromStoryId);
 }
 
 function TaskCard({ task, story, onOpen }: { task: Task; story: Story; onOpen: (selection: SelectedTask) => void }) {
@@ -598,12 +583,12 @@ function TaskDetails({ story, task, onClose, onUpdate, onDelete }: { story: Stor
   );
 }
 
-function Backlog({ stories, onAssignSprint, onDelete, onEditStory }: { stories: Story[]; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void; onEditStory: (storyId: string) => void }) {
+function Backlog({ stories, previousSprintStories, previousSprint, onAssignSprint, onDelete, onEditStory }: { stories: Story[]; previousSprintStories: Story[]; previousSprint: number; onAssignSprint: (storyId: string, sprint: number | null) => void; onDelete: (storyId: string) => void; onEditStory: (storyId: string) => void }) {
   function confirmDelete(story: Story) {
     if (window.confirm(`Eliminare definitivamente la storia “${story.title}” e le sue ${story.tasks.length} task?`)) onDelete(story.id);
   }
 
-  return (
+  return <>
     <section className="backlog-list" aria-label="Storie nel backlog">
       <div className="backlog-list-header"><span>Storie aperte</span><strong>{stories.length}</strong></div>
       {stories.length === 0 ? <p className="empty-board">Non ci sono storie aperte per questa area.</p> : stories.map((story) => {
@@ -623,7 +608,8 @@ function Backlog({ stories, onAssignSprint, onDelete, onEditStory }: { stories: 
         );
       })}
     </section>
-  );
+    {previousSprintStories.length > 0 && <aside className="previous-sprint-banner" aria-label={`Storie non completate dello Sprint ${previousSprint}`}><div><p>Storie rimaste aperte</p><h2>Sprint {previousSprint}</h2><span>Restano nello storico e non vengono spostate automaticamente.</span></div><ul>{previousSprintStories.map((story) => <li key={story.id}><strong>{story.title}</strong><span>{story.tasks.filter((task) => task.status === "done").length}/{story.tasks.length} task completati</span></li>)}</ul></aside>}
+  </>;
 }
 
 function Capacity({ plan, sprint, onChange, onSprintChange }: { plan: CapacityPlan; sprint: number; onChange: (nextPlan: CapacityPlan) => void; onSprintChange: (sprint: number) => void }) {
@@ -762,9 +748,9 @@ export function Dashboard() {
       try {
         const restored = migrateLegacyItems(JSON.parse(storedBoard), defaultSprint);
         if (restored) {
-          const rolledOverStories = rollOverIncompleteStories(restored, defaultSprint);
-          storiesRef.current = rolledOverStories;
-          setStories(rolledOverStories);
+          const cleanedStories = removeAutomaticRolloverCopies(restored);
+          storiesRef.current = cleanedStories;
+          setStories(cleanedStories);
         }
       } catch { /* Keep useful examples when stored data is malformed. */ }
     }
@@ -821,13 +807,13 @@ export function Dashboard() {
       if (data) {
         const restoredStories = migrateLegacyItems(data.stories, defaultSprint);
         if (restoredStories) {
-          const rolledOverStories = rollOverIncompleteStories(restoredStories, defaultSprint);
-          storiesRef.current = rolledOverStories;
-          setStories(rolledOverStories);
-          if (rolledOverStories.length !== restoredStories.length) {
-            const { error: rolloverError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: rolledOverStories, capacity_plan: normaliseCapacityPlans(data.capacity_plan) });
+          const cleanedStories = removeAutomaticRolloverCopies(restoredStories);
+          storiesRef.current = cleanedStories;
+          setStories(cleanedStories);
+          if (cleanedStories.length !== restoredStories.length) {
+            const { error: cleanupError } = await supabase.from("app_states").upsert({ user_id: user.id, stories: cleanedStories, capacity_plan: normaliseCapacityPlans(data.capacity_plan) });
             if (!isMounted) return;
-            if (rolloverError) {
+            if (cleanupError) {
               setCloudStatus("error");
               return;
             }
@@ -853,6 +839,8 @@ export function Dashboard() {
   const visibleStories = useMemo(() => stories.filter((story) => !story.closed && (selectedArea === "Tutte" || story.area === selectedArea)), [stories, selectedArea]);
   const boardStories = useMemo(() => visibleStories.filter((story) => story.sprint === selectedSprint), [visibleStories, selectedSprint]);
   const backlogStories = useMemo(() => visibleStories.filter((story) => !isStoryCompleted(story)), [visibleStories]);
+  const previousSprint = defaultSprint === 1 ? sprintCount : defaultSprint - 1;
+  const previousSprintStories = useMemo(() => visibleStories.filter((story) => story.sprint === previousSprint && !isStoryCompleted(story)), [visibleStories, previousSprint]);
   const boardTasks = boardStories.flatMap((story) => story.tasks);
   const completedTasks = boardTasks.filter((task) => task.status === "done");
   const plannedMinutes = boardTasks.reduce((total, task) => total + task.estimateMinutes, 0);
@@ -994,7 +982,7 @@ export function Dashboard() {
             </DndContext>
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
-            <Backlog stories={backlogStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
+            <Backlog stories={backlogStories} previousSprintStories={previousSprintStories} previousSprint={previousSprint} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
           </> : <Capacity plan={capacityPlans[String(selectedCapacitySprint)] ?? initialCapacityPlan} sprint={selectedCapacitySprint} onChange={commitCapacityPlan} onSprintChange={setSelectedCapacitySprint} />}
         </div>
       </section>
