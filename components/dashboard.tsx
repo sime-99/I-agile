@@ -852,6 +852,7 @@ export function Dashboard() {
 
   const visibleStories = useMemo(() => stories.filter((story) => !story.closed && (selectedArea === "Tutte" || story.area === selectedArea)), [stories, selectedArea]);
   const boardStories = useMemo(() => visibleStories.filter((story) => story.sprint === selectedSprint), [visibleStories, selectedSprint]);
+  const backlogStories = useMemo(() => visibleStories.filter((story) => !isStoryCompleted(story)), [visibleStories]);
   const boardTasks = boardStories.flatMap((story) => story.tasks);
   const completedTasks = boardTasks.filter((task) => task.status === "done");
   const plannedMinutes = boardTasks.reduce((total, task) => total + task.estimateMinutes, 0);
@@ -993,7 +994,7 @@ export function Dashboard() {
             </DndContext>
           </> : view === "backlog" ? <>
             <header className="minimal-header"><div><h1>Backlog</h1><p className="week-meta"><ListChecks size={15} /> Crea storie e assegnale a uno dei {sprintCount} sprint del {sprintYear}</p></div><button className="button button-primary add-button" type="button" onClick={() => setIsNewStoryOpen(true)}><Plus size={18} /> Nuova storia</button></header>
-            <Backlog stories={visibleStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
+            <Backlog stories={backlogStories} onAssignSprint={assignSprint} onDelete={deleteStory} onEditStory={setEditingStoryId} />
           </> : <Capacity plan={capacityPlans[String(selectedCapacitySprint)] ?? initialCapacityPlan} sprint={selectedCapacitySprint} onChange={commitCapacityPlan} onSprintChange={setSelectedCapacitySprint} />}
         </div>
       </section>
